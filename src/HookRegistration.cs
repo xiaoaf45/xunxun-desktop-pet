@@ -19,9 +19,14 @@ static class HookRegistration
     private static readonly (string Name, string? Matcher)[] ClaudeQuestions =
         [("PreToolUse", QuestionMatcher), ("Elicitation", null), ("ElicitationResult", null)];
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
-    private const string ClaudeShellPrefix = "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ";
-    private const string ClaudeScriptPrefix = "$observer = '";
-    private const string ClaudeScriptSuffix = "'\n"
+    internal const string ClaudeCommand = "powershell.exe -NoProfile -NonInteractive -Command '"
+        + "$relay = Join-Path $env:LOCALAPPDATA XunXun/HookRelay/XunXun.exe; "
+        + "if ([IO.File]::Exists($relay)) { & $relay --hook claude | Out-Null }; exit 0'";
+    private const string ManualClaudePrefix = "$relay = '";
+    private const string ManualClaudeSuffix = "'; if ([IO.File]::Exists($relay)) { & $relay --hook claude | Out-Null }; exit 0";
+    private const string LegacyEncodedPrefix = "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ";
+    private const string LegacyScriptPrefix = "$observer = '";
+    private const string LegacyScriptSuffix = "'\n"
         + "if (Test-Path -LiteralPath $observer -PathType Leaf) {\n"
         + "  $utf8 = [Text.UTF8Encoding]::new($false)\n"
         + "  [Console]::InputEncoding = $utf8\n"
@@ -222,6 +227,7 @@ static class HookRegistration
                     else
                     {
                         keep.Remove("args");
+                        keep.Remove("shell");
                         keep["timeout"] = wanted["timeout"]!.DeepClone();
                     }
                 }
@@ -250,7 +256,7 @@ static class HookRegistration
         }
         else
         {
-            handler["command"] = ClaudeCommand(executable);
+            handler["command"] = ClaudeCommand;
             handler["timeout"] = 5;
         }
         return handler;
@@ -265,17 +271,15 @@ static class HookRegistration
         && JsonNode.DeepEquals(handler["args"], wanted["args"])
         && handler["if"] is null;
 
-    internal static string ClaudeCommand(string executable)
-    {
-        // Bash and PowerShell both pass the encoded argument literally, including paths with spaces or punctuation.
-        string script = ClaudeScriptPrefix + executable.Replace("'", "''") + ClaudeScriptSuffix;
-        return ClaudeShellPrefix + Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-    }
+    internal static string ManualClaudeCommand(string executable) =>
+        ManualClaudePrefix + executable.Replace("'", "''") + ManualClaudeSuffix;
 
     private static string? OwnedPath(JsonObject handler, bool codex, string current)
     {
         if (Value(handler["type"]) != "command" || handler["if"] is not null) return null;
         var path = Value(handler["command"]);
+        if (!codex && IsObserver(handler, Observer(false, current))) return current;
+        bool previousShellCommand = false;
         if (codex)
         {
             const string suffix = "' --hook codex";
@@ -284,27 +288,43 @@ static class HookRegistration
                 && command.EndsWith(suffix, StringComparison.Ordinal)
                 ? command[3..^suffix.Length].Replace("''", "'") : null;
         }
-        else if (path is not null && path.StartsWith(ClaudeShellPrefix, StringComparison.Ordinal))
+        else if (path is not null && path.StartsWith(LegacyEncodedPrefix, StringComparison.Ordinal))
         {
             try
             {
-                string script = Encoding.Unicode.GetString(Convert.FromBase64String(path[ClaudeShellPrefix.Length..]));
-                path = script.StartsWith(ClaudeScriptPrefix, StringComparison.Ordinal)
-                    && script.EndsWith(ClaudeScriptSuffix, StringComparison.Ordinal)
-                    ? script[ClaudeScriptPrefix.Length..^ClaudeScriptSuffix.Length].Replace("''", "'") : null;
+                string script = Encoding.Unicode.GetString(Convert.FromBase64String(path[LegacyEncodedPrefix.Length..]));
+                path = ScriptPath(script, LegacyScriptPrefix, LegacyScriptSuffix);
+                if (path is not null && script != LegacyScriptPrefix + path.Replace("'", "''") + LegacyScriptSuffix)
+                    return null;
+                previousShellCommand = true;
             }
             catch (FormatException) { return null; }
+        }
+        else if (path is not null && Value(handler["shell"]) == "powershell")
+        {
+            var manualPath = ScriptPath(path, ManualClaudePrefix, ManualClaudeSuffix);
+            if (manualPath is not null && path == ManualClaudeCommand(manualPath))
+            {
+                path = manualPath;
+                previousShellCommand = true;
+            }
         }
         if (path is null || !Path.IsPathFullyQualified(path)
             || (!string.Equals(path, current, StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(Path.GetFileName(path), "XunXun.exe", StringComparison.OrdinalIgnoreCase))) return null;
         if (IsObserver(handler, Observer(codex, path))) return path;
+        if (previousShellCommand && handler["args"] is null) return path;
         if (!codex && string.Equals(Value(handler["command"]), path, StringComparison.OrdinalIgnoreCase)
             && (JsonNode.DeepEquals(handler["args"], new JsonArray("--hook", "claude"))
                 || handler["args"] is null && handler["timeout"] is JsonValue time
                     && time.TryGetValue<int>(out var seconds) && seconds == 3)) return path;
         return null;
     }
+
+    private static string? ScriptPath(string script, string prefix, string suffix) =>
+        script.StartsWith(prefix, StringComparison.Ordinal) && script.EndsWith(suffix, StringComparison.Ordinal)
+        && script.Length > prefix.Length + suffix.Length
+            ? script[prefix.Length..^suffix.Length].Replace("''", "'") : null;
 
     private static bool CoversMatcher(JsonObject group, string? matcher) =>
         group["matcher"] is null || Value(group["matcher"]) is "" or "*" or ".*" or "^.*$"

@@ -21,7 +21,7 @@ static class Program
         if (args is ["--claude-hook-command"])
         {
             using var output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false));
-            output.WriteLine(HookRegistration.ClaudeCommand(Environment.ProcessPath!));
+            output.WriteLine(HookRegistration.ManualClaudeCommand(Environment.ProcessPath!));
             return 0;
         }
         if (args is ["--hook", "claude" or "codex"])
@@ -173,7 +173,7 @@ static class Program
             {
                 var observer = entries[1].GetProperty("hooks")[0];
                 Require(!observer.TryGetProperty("args", out _)
-                    && observer.GetProperty("command").GetString() == HookRegistration.ClaudeCommand(executable),
+                    && observer.GetProperty("command").GetString() == HookRegistration.ClaudeCommand,
                     "An older executable hook was duplicated or kept its legacy arguments");
             }
             var hooks = root.GetProperty("hooks");
