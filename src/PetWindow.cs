@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Forms = System.Windows.Forms;
 
@@ -35,6 +36,8 @@ sealed class PetWindow : Window
     private readonly DispatcherTimer firstDemo;
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private readonly Forms.NotifyIcon? tray;
+    private readonly System.Drawing.Icon? trayImage;
+    private static readonly Uri IconResource = new("pack://application:,,,/Assets/xunxun.ico");
     private Notice? current;
     private int selection;
     private bool quiet;
@@ -69,6 +72,7 @@ sealed class PetWindow : Window
         Width = 364;
         Height = 302;
         Title = "巡巡 · AI 桌宠";
+        Icon = BitmapFrame.Create(IconResource);
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         AllowsTransparency = true;
@@ -234,12 +238,19 @@ sealed class PetWindow : Window
             animation.Stop();
             firstDemo.Stop();
             if (tray is not null) { tray.Visible = false; tray.Dispose(); }
+            trayImage?.Dispose();
         };
-        if (!preview) tray = TrayIcon();
+        if (!preview)
+        {
+            using var stream = Application.GetResourceStream(IconResource).Stream;
+            using var image = new System.Drawing.Icon(stream, Forms.SystemInformation.SmallIconSize);
+            trayImage = (System.Drawing.Icon)image.Clone();
+            tray = TrayIcon(trayImage);
+        }
         Refresh();
     }
 
-    private Forms.NotifyIcon TrayIcon()
+    private Forms.NotifyIcon TrayIcon(System.Drawing.Icon image)
     {
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("播放三段演示", null, (_, _) => StartDemo());
@@ -250,7 +261,7 @@ sealed class PetWindow : Window
         menu.Items.Add("退出巡巡", null, (_, _) => Application.Current.Shutdown());
         return new Forms.NotifyIcon
         {
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = image,
             Text = "巡巡 · AI 桌宠",
             ContextMenuStrip = menu,
             Visible = true

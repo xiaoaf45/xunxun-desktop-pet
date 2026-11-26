@@ -6,8 +6,10 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <AssemblyName>XunXun</AssemblyName>
+    <ApplicationIcon>Assets\xunxun.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\*.cur" />
+    <Resource Include="Assets\xunxun.ico" />
   </ItemGroup>
 </Project>
