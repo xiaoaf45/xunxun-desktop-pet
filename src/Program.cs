@@ -36,7 +36,7 @@ static class Program
         _ = T3Completion.Watch(item => window.Dispatcher.InvokeAsync(() => window.Receive(item)), shutdown.Token);
         app.Exit += (_, _) => shutdown.Cancel();
         window.Show();
-        if (!Array.Exists(args, arg => arg == "--live")) window.StartDemo();
+        if (Array.IndexOf(args, "--demo") >= 0) window.StartDemo();
         return app.Run();
     }
 

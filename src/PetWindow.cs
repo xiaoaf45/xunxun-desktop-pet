@@ -23,11 +23,13 @@ sealed class PetWindow : Window
     private readonly ScaleTransform petScale = new(1, 1, 70, 73);
     private const double AnchorX = 288;
     private const double AnchorY = 219;
+    private const int NoticeDurationSeconds = 10;
     private readonly Border card;
     private readonly Border playTray;
     private readonly Button napButton;
     private readonly TextBlock category = Label("", 12, "#FFC185", true);
     private readonly TextBlock source = Label("", 11, "#BABAD3");
+    private readonly TextBlock countdown = Label("", 11, "#BABAD3");
     private readonly TextBlock headline = Label("", 18, "#FEF8EC", true);
     private readonly TextBlock detail = Label("", 12, "#CECEE1");
     private readonly Button open = Action("回到任务  ↗", true);
@@ -39,6 +41,8 @@ sealed class PetWindow : Window
     private readonly System.Drawing.Icon? trayImage;
     private static readonly Uri IconResource = new("pack://application:,,,/Assets/xunxun.ico");
     private Notice? current;
+    private double? noticeClosesAt;
+    private int countdownSeconds;
     private int selection;
     private bool quiet;
     private double playingSince;
@@ -100,6 +104,10 @@ sealed class PetWindow : Window
         close.Click += (_, _) => Dismiss();
         DockPanel.SetDock(close, Dock.Right);
         top.Children.Add(close);
+        countdown.Margin = new Thickness(0, 0, 8, 0);
+        countdown.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(countdown, Dock.Right);
+        top.Children.Add(countdown);
         top.Children.Add(category);
         source.Margin = new Thickness(10, 0, 0, 0);
         source.VerticalAlignment = VerticalAlignment.Center;
@@ -286,11 +294,19 @@ sealed class PetWindow : Window
     {
         var pending = sessions.Values.OrderBy(pair => pair.Seen).Select(pair => pair.Item)
             .Where(item => item.Mood is Mood.Approval or Mood.Question or Mood.Done).ToArray();
+        var previous = current;
         current = pending.Length == 0 ? null : pending[selection % pending.Length];
         var mood = current?.Mood ?? (sessions.Count == 0 ? Mood.Roam : Mood.Working);
         pet.Mood = quiet && current is not null ? Mood.Roam : mood;
         pet.InvalidateVisual();
         card.Visibility = quiet || current is null ? Visibility.Collapsed : Visibility.Visible;
+        if (card.Visibility != Visibility.Visible)
+            noticeClosesAt = null;
+        else if (noticeClosesAt is null || current != previous)
+        {
+            noticeClosesAt = clock.Elapsed.TotalSeconds + NoticeDurationSeconds;
+            SetCountdown(NoticeDurationSeconds);
+        }
         if (card.Visibility == Visibility.Visible && IsVisible)
         {
             var area = workArea;
@@ -333,6 +349,12 @@ sealed class PetWindow : Window
     private void Animate()
     {
         double elapsed = clock.Elapsed.TotalSeconds;
+        if (noticeClosesAt is { } deadline)
+        {
+            int remaining = (int)Math.Ceiling(deadline - elapsed);
+            if (remaining <= 0) Dismiss();
+            else SetCountdown(remaining);
+        }
         double frame = Math.Clamp(elapsed - lastFrame, 0, 0.075);
         lastFrame = elapsed;
         pet.Time = elapsed;
@@ -352,6 +374,13 @@ sealed class PetWindow : Window
             .Select(pair => pair.Key).ToArray();
         foreach (var key in expired) sessions.Remove(key);
         if (expired.Length != 0) Refresh();
+    }
+
+    private void SetCountdown(int seconds)
+    {
+        if (countdownSeconds == seconds) return;
+        countdownSeconds = seconds;
+        countdown.Text = $"{seconds} 秒后关闭";
     }
 
     internal Point ScreenAnchor => PointToScreen(new Point(AnchorX, AnchorY));
@@ -463,7 +492,8 @@ sealed class PetWindow : Window
         if (!canRoam)
         {
             // Keep the hit area stable under the cursor during an interaction.
-            if (pet.Mood != Mood.Roam) ResizePet(1, frame);
+            if (!pet.IsMouseCaptured && !dragging && !pet.IsMouseOver && !playTray.IsMouseOver)
+                ResizePet(DesktopRoam.ScaleFor(position, position, icons), frame);
             return;
         }
 
