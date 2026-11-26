@@ -20,11 +20,14 @@ sealed class PetWindow : Window
     private readonly Dictionary<string, Window> demoWindows = new();
     private readonly PetArt pet = new();
     private readonly DesktopRoam roam = new();
+    private readonly RoamTricks roamTricks = new();
     private readonly ScaleTransform petScale = new(1, 1, 70, 73);
     private const double AnchorX = 288;
     private const double AnchorY = 219;
     private const int NoticeDurationSeconds = 10;
     private readonly Border card;
+    private readonly bool preview;
+    private Window? noticeWindow;
     private readonly Border playTray;
     private readonly Button napButton;
     private readonly TextBlock category = Label("", 12, "#FFC185", true);
@@ -61,6 +64,7 @@ sealed class PetWindow : Window
     private DesktopRoam.Display[] displays = [];
     private Rect workArea;
     private Point press;
+    private Vector dragOffset;
     private Play pressAction;
     private HighFivePointer? highFivePointer;
     private bool dragging;
@@ -74,6 +78,7 @@ sealed class PetWindow : Window
 
     public PetWindow(bool preview = false)
     {
+        this.preview = preview;
         Width = 364;
         Height = 302;
         Title = "巡巡 · AI 桌宠";
@@ -126,9 +131,12 @@ sealed class PetWindow : Window
         open.Click += (_, _) => Jump();
         content.Children.Add(controls);
         card.Child = content;
-        Canvas.SetLeft(card, 8);
-        Canvas.SetTop(card, 4);
-        canvas.Children.Add(card);
+        if (preview)
+        {
+            Canvas.SetLeft(card, 8);
+            Canvas.SetTop(card, 4);
+            canvas.Children.Add(card);
+        }
 
         Canvas.SetLeft(pet, 218);
         Canvas.SetTop(pet, 146);
@@ -164,7 +172,7 @@ sealed class PetWindow : Window
         Content = canvas;
 
         var menu = new ContextMenu();
-        AddMenu(menu, "播放三段演示", StartDemo);
+        AddMenu(menu, "播放提醒演示", StartDemo);
         var mute = new MenuItem { Header = "免打扰", IsCheckable = true };
         mute.Click += (_, _) => SetQuiet(mute.IsChecked);
         menu.Items.Add(mute);
@@ -185,7 +193,8 @@ sealed class PetWindow : Window
         pet.MouseLeftButtonDown += (_, eventArgs) =>
         {
             ReleaseHighFivePointer();
-            press = eventArgs.GetPosition(pet);
+            press = eventArgs.GetPosition(this);
+            dragOffset = PointToScreen(press) - PointToScreen(new Point());
             pressAction = pet.Activity == Play.Nap ? Play.Wake
                 : pet.PointerPose == PointerPose.Paw ? Play.HighFive : Play.Pat;
             dragging = false;
@@ -201,26 +210,28 @@ sealed class PetWindow : Window
                 return;
             }
             if (!pet.IsMouseCaptured) return;
-            var shift = position - press;
-            if (shift.Length < 5) return;
-            pet.ReleaseMouseCapture();
-            dragging = true;
-            pet.Cursor = PetCursors.Open;
-            try { DragMove(); }
-            catch (InvalidOperationException) { }
-            finally
+            if (!dragging)
             {
-                dragging = false;
-                nextWorkAreaRead = 0;
-                roam.Reset(clock.Elapsed.TotalSeconds);
+                var shift = eventArgs.GetPosition(this) - press;
+                if (Math.Abs(shift.X) < SystemParameters.MinimumHorizontalDragDistance
+                    && Math.Abs(shift.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+                dragging = true;
+                StartPlay(Play.None);
+                pet.IsBeingDragged = true;
+                pet.InvalidateVisual();
             }
+            var cursor = Forms.Cursor.Position;
+            var windowOrigin = DesktopPoint(new Point(cursor.X, cursor.Y) - dragOffset);
+            Left = windowOrigin.X;
+            Top = windowOrigin.Y;
         };
         pet.MouseLeftButtonUp += (_, _) =>
         {
             bool pickedUp = pet.IsMouseCaptured;
+            bool dragged = dragging;
             pet.ReleaseMouseCapture();
             pet.Cursor = PetCursors.Open;
-            if (!pickedUp || dragging) return;
+            if (!pickedUp || dragged) return;
             StartPlay(pressAction);
             if (pressAction == Play.HighFive)
             {
@@ -230,7 +241,16 @@ sealed class PetWindow : Window
                 pet.Cursor = PetCursors.Pressed;
             }
         };
-        pet.LostMouseCapture += (_, _) => pet.Cursor = PetCursors.Open;
+        pet.LostMouseCapture += (_, _) =>
+        {
+            pet.Cursor = PetCursors.Open;
+            if (!dragging) return;
+            dragging = false;
+            pet.IsBeingDragged = false;
+            pet.InvalidateVisual();
+            nextWorkAreaRead = 0;
+            roam.Reset(clock.Elapsed.TotalSeconds);
+        };
         Deactivated += (_, _) => ReleaseHighFivePointer();
 
         var work = SystemParameters.WorkArea;
@@ -262,7 +282,7 @@ sealed class PetWindow : Window
     private Forms.NotifyIcon TrayIcon(System.Drawing.Icon image)
     {
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("播放三段演示", null, (_, _) => StartDemo());
+        menu.Items.Add("播放提醒演示", null, (_, _) => StartDemo());
         var mute = new Forms.ToolStripMenuItem("免打扰") { CheckOnClick = true };
         mute.CheckedChanged += (_, _) => SetQuiet(mute.Checked);
         menu.Opening += (_, _) => mute.Checked = quiet;
@@ -280,41 +300,38 @@ sealed class PetWindow : Window
     public void Receive(Notice item)
     {
         var key = (item.Provider, item.Session, item.Demo);
-        if (item.Mood == Mood.Ended && sessions.TryGetValue(key, out var last) && last.Item.Mood == Mood.Done)
-            return;
-        if (item.Mood is Mood.Interrupted or Mood.Ended)
-            sessions.Remove(key);
-        else
+        if (item.Mood is Mood.Approval or Mood.Question or Mood.Done)
             sessions[key] = (item, DateTime.UtcNow);
+        else if (sessions.TryGetValue(key, out var last)
+            && (item.Mood == Mood.Interrupted
+                || item.Mood == Mood.Ended && last.Item.Mood != Mood.Done
+                || item.Mood == Mood.PromptResolved && last.Item.Mood != Mood.Done && last.Item.Tool == item.Tool))
+            sessions.Remove(key);
+        else return;
         selection = 0;
         Refresh();
     }
 
     private void Refresh()
     {
-        var pending = sessions.Values.OrderBy(pair => pair.Seen).Select(pair => pair.Item)
-            .Where(item => item.Mood is Mood.Approval or Mood.Question or Mood.Done).ToArray();
+        var pending = sessions.Values.OrderBy(pair => pair.Seen).Select(pair => pair.Item).ToArray();
         var previous = current;
         current = pending.Length == 0 ? null : pending[selection % pending.Length];
-        var mood = current?.Mood ?? (sessions.Count == 0 ? Mood.Roam : Mood.Working);
-        pet.Mood = quiet && current is not null ? Mood.Roam : mood;
-        pet.InvalidateVisual();
         card.Visibility = quiet || current is null ? Visibility.Collapsed : Visibility.Visible;
         if (card.Visibility != Visibility.Visible)
+        {
             noticeClosesAt = null;
-        else if (noticeClosesAt is null || current != previous)
+            noticeWindow?.Hide();
+            return;
+        }
+        bool newlyShown = noticeClosesAt is null || current != previous;
+        if (newlyShown)
         {
             noticeClosesAt = clock.Elapsed.TotalSeconds + NoticeDurationSeconds;
             SetCountdown(NoticeDurationSeconds);
         }
-        if (card.Visibility == Visibility.Visible && IsVisible)
-        {
-            var area = workArea;
-            Left = Math.Clamp(Left, area.Left, Math.Max(area.Left, area.Right - Width));
-            Top = Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - Height));
-        }
         if (current is not { } item) return;
-        var (tag, title, accent) = mood switch
+        var (tag, title, accent) = item.Mood switch
         {
             Mood.Approval => ("待审批", "有一步需要你确认", "#FFC185"),
             Mood.Question => ("等回复", "有个问题等你回答", "#CFC0FF"),
@@ -324,7 +341,7 @@ sealed class PetWindow : Window
         category.Foreground = ColorBrush(accent);
         headline.Text = title;
         source.Text = item.Demo ? item.Provider + "  ·  演示" : item.Provider;
-        detail.Text = item.Demo ? mood switch
+        detail.Text = item.Demo ? item.Mood switch
         {
             Mood.Approval => "组件文档 · 等待确认是否运行检查",
             Mood.Question => "测试工作区 · 请选择要验证的范围",
@@ -337,6 +354,24 @@ sealed class PetWindow : Window
             : t3 && linked ? "打开 T3 会话  ↗" : linked ? "切到任务窗口  ↗" : "未绑定窗口";
         next.Content = $"下一条  {pending.Length - 1}";
         next.Visibility = pending.Length > 1 ? Visibility.Visible : Visibility.Collapsed;
+        if (!preview && newlyShown) ShowNoticeWindow();
+    }
+
+    private void ShowNoticeWindow()
+    {
+        noticeWindow ??= new Window
+        {
+            Owner = this, Title = "巡巡 · 任务提醒", WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize, AllowsTransparency = true, Background = Brushes.Transparent,
+            SizeToContent = SizeToContent.WidthAndHeight, ShowInTaskbar = false, ShowActivated = false,
+            Topmost = Topmost, FontFamily = FontFamily, UseLayoutRounding = true, Content = card
+        };
+        card.Measure(new Size(card.Width, double.PositiveInfinity));
+        noticeWindow.Left = Math.Clamp(Left + 8, workArea.Left,
+            Math.Max(workArea.Left, workArea.Right - card.Width));
+        double maxTop = Math.Max(workArea.Top, workArea.Bottom - card.DesiredSize.Height);
+        noticeWindow.Top = Math.Clamp(Top + 4, workArea.Top, maxTop);
+        if (!noticeWindow.IsVisible) noticeWindow.Show();
     }
 
     private void SetQuiet(bool value)
@@ -363,14 +398,13 @@ sealed class PetWindow : Window
             pet.Activity = Play.None;
         if (elapsed >= offerPlayUntil && pet.Activity == Play.None)
             playTray.Visibility = Visibility.Collapsed;
-        if (dragging && Mouse.LeftButton == MouseButtonState.Released) dragging = false;
         MoveHighFivePointer();
         AdvanceMotion(Forms.Cursor.Position, elapsed, frame);
         pet.InvalidateVisual();
         if (DateTime.UtcNow < cleanupAt) return;
         cleanupAt = DateTime.UtcNow.AddSeconds(30);
-        var expired = sessions.Where(pair => !pair.Value.Item.Demo && DateTime.UtcNow - pair.Value.Seen >
-            (pair.Value.Item.Mood == Mood.Working ? TimeSpan.FromMinutes(30) : TimeSpan.FromHours(2)))
+        var expired = sessions.Where(pair => !pair.Value.Item.Demo
+            && DateTime.UtcNow - pair.Value.Seen > TimeSpan.FromHours(2))
             .Select(pair => pair.Key).ToArray();
         foreach (var key in expired) sessions.Remove(key);
         if (expired.Length != 0) Refresh();
@@ -487,8 +521,9 @@ sealed class PetWindow : Window
         }
         pet.Walking = false;
 
-        bool canRoam = pet.Mood == Mood.Roam && pet.Activity == Play.None
+        bool canRoam = pet.Activity == Play.None
             && !pet.IsMouseCaptured && !dragging && !pet.IsMouseOver && !playTray.IsMouseOver;
+        pet.RoamPose = roamTricks.Update(elapsed, canRoam && !following);
         if (!canRoam)
         {
             // Keep the hit area stable under the cursor during an interaction.
@@ -563,7 +598,6 @@ sealed class PetWindow : Window
         var work = SystemParameters.WorkArea;
         Left = work.Right - Width - 26;
         Top = work.Bottom - Height - 13;
-        Receive(Notice.Sample("Claude Code", Mood.Working));
         firstDemo.Stop();
         firstDemo.Start();
     }
@@ -642,11 +676,14 @@ sealed class PetWindow : Window
     public IntPtr DemoHandle(string provider) => demoWindows.TryGetValue(provider, out var window)
         ? new WindowInteropHelper(window).Handle : IntPtr.Zero;
 
-    public void PreviewPose(double time, double playTime = 0, PointerPose pointer = PointerPose.None)
+    public void PreviewPose(double time, double playTime = 0, PointerPose pointer = PointerPose.None,
+        RoamPose performance = default, bool grabbed = false)
     {
         pet.Time = time;
         pet.PlayTime = playTime;
         pet.PointerPose = pointer;
+        pet.RoamPose = performance;
+        pet.IsBeingDragged = grabbed;
         pet.LookAt = pointer == PointerPose.None ? default : new Vector(56, -22);
         pet.InvalidateVisual();
     }
@@ -664,7 +701,7 @@ sealed class PetWindow : Window
         new() { Text = text, FontSize = size, Foreground = ColorBrush(color),
             FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal };
 
-    private static Button Action(string title, bool primary)
+    internal static Button Action(string title, bool primary)
     {
         var button = new Button
         {

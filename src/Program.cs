@@ -37,6 +37,8 @@ static class Program
         app.Exit += (_, _) => shutdown.Cancel();
         window.Show();
         if (Array.IndexOf(args, "--demo") >= 0) window.StartDemo();
+        window.Dispatcher.InvokeAsync(() => HookRegistration.Offer(window),
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         return app.Run();
     }
 
@@ -50,7 +52,9 @@ static class Program
             try
             {
                 await CheckRelay();
+                CheckHookRegistration(directory);
                 CheckRoaming();
+                CheckRoamTricks();
                 CheckDisplayCrossing();
                 bool nativeCrossing = await CheckNativeCrossing(window);
                 CheckT3Completion();
@@ -67,6 +71,13 @@ static class Program
                 window.Receive(t3Notice);
                 Require(window.Current == t3Notice && window.OpenButton.IsEnabled, "T3 completion card could not open its thread");
                 window.Receive(t3Notice with { Mood = Mood.Interrupted });
+                var prompt = new Notice("Claude Code", "prompt-resolved-test", Mood.Approval, false, "",
+                    0, 0, 0, Tool: "Bash");
+                window.Receive(prompt);
+                window.Receive(prompt with { Mood = Mood.PromptResolved, Tool = "Read" });
+                Require(window.Current == prompt, "An unrelated tool cleared an approval reminder");
+                window.Receive(prompt with { Mood = Mood.PromptResolved });
+                Require(window.Current is null, "The completed tool left its approval reminder open");
                 var demo = Notice.Sample("Claude Code", Mood.Approval);
                 window.Receive(demo);
                 window.StartPlay(Play.Nap);
@@ -88,7 +99,7 @@ static class Program
                     Require(WindowsNative.GetForegroundWindow() == handle, "Wrong foreground window");
                 }
                 File.WriteAllText(Path.Combine(directory, "self-test.txt"),
-                    "PASS: relay mappings, T3 completion filtering, notice and play visuals, cursor assets, high-five pointer, roaming, icon detour and sizing, cross-display pursuit and roaming, reminder during play, stale target guard. "
+                    "PASS: relay mappings, CLI hook registration, T3 completion filtering, notice and play visuals, autonomous play cycle, cursor assets, high-five pointer, roaming, icon detour and sizing, cross-display pursuit and roaming, reminder during play, stale target guard. "
                     + (nativeCrossing ? "PASS: two physical displays crossed using replayed pointer positions. " : "")
                     + $"Desktop icon bounds read: {iconBounds.Length}. "
                     + (activated ? "PASS: native foreground." : "UNVERIFIED: Windows did not grant foreground to automated run."));
@@ -102,6 +113,54 @@ static class Program
         };
         window.Show();
         return app.Run();
+    }
+
+    private static void CheckHookRegistration(string directory)
+    {
+        string testRoot = Path.Combine(directory, "hook-fixtures-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(testRoot);
+        string executable = Path.Combine(testRoot, "XunXun's test", "XunXun.exe");
+        foreach (var cli in new[] { "claude", "codex" })
+        {
+            string path = Path.Combine(testRoot, cli + ".json");
+            var target = new HookRegistration.Target(cli, cli, path);
+            Require(!HookRegistration.Registered(target, executable) && !File.Exists(path),
+                "The startup check changed an unregistered configuration");
+            const string original = """{"theme":"dark","hooks":{"Stop":[{"matcher":"*","hooks":[{"type":"command","command":"existing command"}]}]}}""";
+            File.WriteAllText(path, original);
+            Require(HookRegistration.Register(target, executable) && HookRegistration.Registered(target, executable),
+                "The hook installation did not complete");
+            string written = File.ReadAllText(path);
+            using var json = JsonDocument.Parse(written);
+            var root = json.RootElement;
+            var entries = root.GetProperty("hooks").GetProperty("Stop");
+            Require(root.GetProperty("theme").GetString() == "dark" && entries.GetArrayLength() == 2
+                && entries[0].GetProperty("hooks")[0].GetProperty("command").GetString() == "existing command",
+                "An existing setting or hook was overwritten");
+            var hooks = root.GetProperty("hooks");
+            Require(hooks.GetProperty("PermissionRequest").GetArrayLength() == 1
+                && (cli != "claude" || hooks.GetProperty("PreToolUse")[0].GetProperty("matcher").GetString()
+                    == "^AskUserQuestion$"), "Registration is missing approval or question hooks");
+            string backup = Directory.GetFiles(testRoot, cli + ".json.xunxun-*.bak").Single();
+            Require(File.ReadAllText(backup) == original && !HookRegistration.Register(target, executable)
+                && File.ReadAllText(path) == written, "Hook installation was not atomic and idempotent");
+
+            var relocated = Path.Combine(testRoot, "updated", "XunXun.exe");
+            Require(!HookRegistration.Registered(target, relocated) && HookRegistration.Register(target, relocated),
+                "The installer did not repair an old executable path");
+            using var updated = JsonDocument.Parse(File.ReadAllText(path));
+            Require(updated.RootElement.GetProperty("hooks").GetProperty("Stop").GetArrayLength() == 2,
+                "Repairing the executable path added a second copy of the hook");
+        }
+        var broken = new HookRegistration.Target("Claude Code", "claude", Path.Combine(testRoot, "broken.json"));
+        File.WriteAllText(broken.File, "{ invalid");
+        try
+        {
+            HookRegistration.Register(broken, executable);
+            Require(false, "An invalid configuration was overwritten");
+        }
+        catch (JsonException) { }
+        Require(File.ReadAllText(broken.File) == "{ invalid", "An invalid configuration was changed");
     }
 
     private static void CheckHighFivePointer()
@@ -159,6 +218,20 @@ static class Program
             [new Rect(188, 128, 60, 44)]);
         Require(detour.X > beforeIcon.X && Math.Abs(detour.Y - beforeIcon.Y) > 0.8,
             "Pet did not detour around the isolated icon");
+    }
+
+    private static void CheckRoamTricks()
+    {
+        var tricks = new RoamTricks(new Random(1));
+        Require(tricks.Update(0, true).Trick == RoamTrick.None
+            && tricks.Update(3.5, true).Trick == RoamTrick.Hop
+            && tricks.Update(4, true).Progress > 0
+            && tricks.Update(6, true).Trick == RoamTrick.None,
+            "Roaming did not start and finish the hopping action");
+        Require(tricks.Update(14, true).Trick == RoamTrick.Dribble
+            && tricks.Update(15, false).Trick == RoamTrick.None
+            && tricks.Update(24, true).Trick == RoamTrick.Kick,
+            "Roaming did not rotate ball actions or yield to user interaction");
     }
 
     private static void CheckDisplayCrossing()
@@ -282,11 +355,13 @@ static class Program
         {
             foreach (var (provider, hook, tool, mood) in new[]
             {
-                ("Claude Code", "UserPromptSubmit", "", Mood.Working),
+                ("Claude Code", "UserPromptSubmit", "", Mood.Interrupted),
                 ("Claude Code", "PermissionRequest", "Bash", Mood.Approval),
+                ("Claude Code", "PermissionRequest", "AskUserQuestion", Mood.Question),
                 ("Claude Code", "PreToolUse", "AskUserQuestion", Mood.Question),
-                ("Claude Code", "PostToolUse", "AskUserQuestion", Mood.Working),
+                ("Claude Code", "PostToolUse", "AskUserQuestion", Mood.PromptResolved),
                 ("Claude Code", "Elicitation", "", Mood.Question),
+                ("Claude Code", "ElicitationResult", "", Mood.PromptResolved),
                 ("Codex CLI", "PermissionRequest", "apply_patch", Mood.Approval),
                 ("Codex CLI", "Stop", "", Mood.Done),
                 ("Codex CLI", "Interrupt", "", Mood.Interrupted),
@@ -347,7 +422,8 @@ static class Program
     private static void SavePlayPreview(PetWindow window, string path)
     {
         const int width = 1040;
-        const int height = 522;
+        const int height = 748;
+        const int columns = 5;
         var composed = new DrawingVisual();
         using (var dc = composed.RenderOpen())
         {
@@ -356,26 +432,30 @@ static class Program
             PreviewText(dc, "点击摸头，轻轻来回挠痒，停一会儿可以击掌", 13, "#C3BFDA", 149, 25);
             var actions = new[]
             {
-                (Play.Pat, 0.37, PointerPose.None, "抚摸"),
-                (Play.Feed, 0.20, PointerPose.None, "喂胡萝卜"),
-                (Play.Fetch, 0.97, PointerPose.None, "抛球"),
-                (Play.Dance, 0.15, PointerPose.None, "跳舞"),
-                (Play.Nap, 0.92, PointerPose.None, "小睡"),
-                (Play.None, 0.0, PointerPose.Sniff, "凑近闻闻"),
-                (Play.Rub, 0.56, PointerPose.None, "挠痒"),
-                (Play.None, 0.0, PointerPose.Paw, "邀请击掌"),
-                (Play.HighFive, 0.53, PointerPose.None, "击掌")
+                (Play.Pat, 0.37, PointerPose.None, default(RoamPose), false, "抚摸"),
+                (Play.Feed, 0.20, PointerPose.None, default(RoamPose), false, "喂胡萝卜"),
+                (Play.Fetch, 0.97, PointerPose.None, default(RoamPose), false, "抛球"),
+                (Play.Dance, 0.15, PointerPose.None, default(RoamPose), false, "跳舞"),
+                (Play.Nap, 0.92, PointerPose.None, default(RoamPose), false, "小睡"),
+                (Play.None, 0.0, PointerPose.Sniff, default(RoamPose), false, "凑近闻闻"),
+                (Play.Rub, 0.56, PointerPose.None, default(RoamPose), false, "挠痒"),
+                (Play.None, 0.0, PointerPose.Paw, default(RoamPose), false, "邀请击掌"),
+                (Play.HighFive, 0.53, PointerPose.None, default(RoamPose), false, "击掌"),
+                (Play.None, 0.0, PointerPose.None, default(RoamPose), true, "拖动挣扎"),
+                (Play.None, 0.0, PointerPose.None, new RoamPose(RoamTrick.Hop, 0.16), false, "小跳"),
+                (Play.None, 0.0, PointerPose.None, new RoamPose(RoamTrick.Dribble, 0.125), false, "拍球运球"),
+                (Play.None, 0.0, PointerPose.None, new RoamPose(RoamTrick.Kick, 0.48), false, "踢球")
             };
             for (var i = 0; i < actions.Length; i++)
             {
-                var (activity, time, pointer, label) = actions[i];
-                double x = 20 + i % 5 * 202;
-                double y = i / 5 * 226;
+                var (activity, time, pointer, performance, grabbed, label) = actions[i];
+                double x = 20 + i % columns * 202;
+                double y = i / columns * 226;
                 dc.DrawRoundedRectangle(PetWindow.ColorBrush("#30304B"), null,
                     new Rect(x, y + 62, 192, 214), 18, 18);
                 PreviewText(dc, label, 13, "#E1DDF3", x + 13, y + 74);
                 window.StartPlay(activity);
-                window.PreviewPose(0.7, time, pointer);
+                window.PreviewPose(0.7, time, pointer, performance, grabbed);
                 window.Surface.UpdateLayout();
                 var frame = new RenderTargetBitmap(364, 302, 96, 96, PixelFormats.Pbgra32);
                 frame.Render(window.Surface);
@@ -385,6 +465,7 @@ static class Program
         }
         // Restore the idle pose so preview generation does not affect later checks.
         window.StartPlay(Play.None);
+        window.PreviewPose(0);
         SaveBitmap(composed, width, height, path);
     }
 

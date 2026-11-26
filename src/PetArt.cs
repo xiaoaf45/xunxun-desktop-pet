@@ -7,6 +7,36 @@ namespace XunXun;
 
 enum Play { None, Pat, Feed, Fetch, Dance, Nap, Wake, Rub, HighFive }
 enum PointerPose { None, Sniff, Paw }
+enum RoamTrick { None, Hop, Dribble, Kick }
+
+readonly record struct RoamPose(RoamTrick Trick, double Progress);
+
+sealed class RoamTricks(Random? random = null)
+{
+    private static readonly (RoamTrick Trick, double Duration)[] Sequence =
+        [(RoamTrick.Hop, 1.55), (RoamTrick.Dribble, 2.5), (RoamTrick.Kick, 1.7)];
+    private readonly Random random = random ?? Random.Shared;
+    private int next;
+    private double startsAt = 3.5;
+    private double? activeSince;
+
+    public RoamPose Update(double elapsed, bool free)
+    {
+        if (activeSince is { } started)
+        {
+            var (trick, duration) = Sequence[next];
+            if (free && elapsed - started < duration)
+                return new RoamPose(trick, (elapsed - started) / duration);
+
+            next = (next + 1) % Sequence.Length;
+            activeSince = null;
+            startsAt = elapsed + 4 + random.NextDouble() * 4;
+        }
+        if (!free || elapsed < startsAt) return default;
+        activeSince = elapsed;
+        return new RoamPose(Sequence[next].Trick, 0);
+    }
+}
 
 static class PlayTiming
 {
@@ -36,9 +66,10 @@ sealed class PetArt : FrameworkElement
     private const string Peach = "#FFAA78";
     private const string Purple = "#B8A6FC";
 
-    public Mood Mood { get; set; }
     public double Time { get; set; }
     public Play Activity { get; set; }
+    public RoamPose RoamPose { get; set; }
+    public bool IsBeingDragged { get; set; }
     public double PlayTime { get; set; }
     public bool FacingLeft { get; set; }
     public bool Walking { get; set; }
@@ -62,11 +93,15 @@ sealed class PetArt : FrameworkElement
         bool resting = Activity == Play.Nap;
         bool chewing = Activity == Play.Feed && progress is > 0.28 and < 0.78;
         bool walking = Walking || Activity == Play.Fetch;
-        double stride = walking ? Math.Sin(Time * 10) * 4 : 0;
+        double wiggle = IsBeingDragged ? Math.Sin(Time * 23) : 0;
+        double stride = IsBeingDragged ? 7 * wiggle : walking ? Math.Sin(Time * 10) * 4 : 0;
         double bounce = walking ? -Math.Abs(stride) : Math.Sin(Time * 3) * 1.5;
+        var roam = Activity == Play.None && !IsBeingDragged ? RoamPose : default;
+        double jump = roam.Trick == RoamTrick.Hop ? Math.Abs(Math.Sin(roam.Progress * Math.PI * 3)) : 0;
+        double kick = roam.Trick == RoamTrick.Kick
+            ? Math.Sin(Math.Clamp((roam.Progress - 0.05) / 0.5, 0, 1) * Math.PI) : 0;
         double eyeX = Math.Clamp(LookAt.X / 22, -4.5, 4.5) * (FacingLeft ? -1 : 1);
         double eyeY = Math.Clamp(LookAt.Y / 28, -2.2, 2.6);
-        if (Mood == Mood.Done && Activity == Play.None) bounce -= Math.Abs(Math.Sin(Time * 5)) * 8;
         var (shift, lift, tilt, scale) = Activity switch
         {
             Play.Pat => (reach * -3, reach * 3, reach * -11, 1 - reach * 0.10),
@@ -81,7 +116,16 @@ sealed class PetArt : FrameworkElement
                 (eyeX * 0.6, Math.Sin(Time * 12) * 1.6, eyeX * 1.9, 1.0),
             _ => (0.0, 0.0, 0.0, 1.0)
         };
-        Oval(dc, 70, 108, 42, 6, "#33262541");
+        lift -= jump * 17 + kick * 6;
+        tilt += jump * Math.Sin(roam.Progress * Math.Tau) * 7 - kick * 8;
+        scale += jump * 0.09;
+        if (IsBeingDragged)
+        {
+            shift += 5 * wiggle;
+            tilt += 12 * wiggle;
+            lift -= 4 + Math.Abs(wiggle) * 4;
+        }
+        Oval(dc, 70, 108, IsBeingDragged ? 28 : 42, 6, "#33262541");
 
         if (FacingLeft) dc.PushTransform(new ScaleTransform(-1, 1, 68, 0));
         dc.PushTransform(new TranslateTransform(shift, bounce + lift));
@@ -93,14 +137,18 @@ sealed class PetArt : FrameworkElement
         dc.PushTransform(new RotateTransform(resting ? 1 : wag, 35, 84));
         Shape(dc, "M40,82 C24,89 12,81 14,72 C15,65 24,68 29,71 L43,73 Z", Purple, Ink, 2.4);
         dc.Pop();
-        Oval(dc, 51 + stride, 99, 13, 7, Shadow, Ink, 2.4);
-        Oval(dc, 85 - stride, 99, 14, 7, Cream, Ink, 2.4);
+        Oval(dc, 51 + stride, 99 - Math.Max(0, wiggle) * 8, 13, 7, Shadow, Ink, 2.4);
+        Oval(dc, 85 - stride + kick * 18, 99 - kick * 8 + Math.Min(0, wiggle) * 8, 14, 7, Cream, Ink, 2.4);
         Shape(dc, "M36,71 C37,58 52,49 71,49 C98,49 111,66 108,84 C106,100 90,103 65,102 C44,102 32,91 36,71 Z", Cream, Ink, 2.6);
         Shape(dc, "M36,78 C46,91 84,98 105,89 C101,98 86,102 65,101 C48,101 36,93 36,78 Z", Shadow);
+        dc.PushTransform(new RotateTransform(wiggle * 15, 48, 47));
         Shape(dc, "M44,54 C34,45 27,18 34,11 C41,4 53,19 60,37 L61,53 Z", Cream, Ink, 2.5);
         Shape(dc, "M44,44 C39,35 34,20 36,17 C41,13 48,26 51,37 Z", Peach);
+        dc.Pop();
+        dc.PushTransform(new RotateTransform(-wiggle * 17, 83, 47));
         Shape(dc, "M73,46 C77,30 89,7 98,11 C108,15 101,38 91,50 Z", Cream, Ink, 2.5);
         Shape(dc, "M83,40 C89,24 96,16 99,17 C101,21 97,34 91,41 Z", Peach);
+        dc.Pop();
         Shape(dc, "M35,59 C39,42 55,34 76,35 C99,36 113,49 115,65 C117,83 101,93 76,93 C49,93 31,81 35,59 Z", Cream, Ink, 2.8);
         Shape(dc, "M47,57 C54,47 66,44 80,45 C97,46 107,53 108,66 C110,78 96,85 76,84 C58,84 45,77 45,67 C45,64 46,60 47,57 Z", Ink);
         Shape(dc, "M52,58 C58,50 71,48 84,50", null, "#565779", 1.7);
@@ -108,12 +156,16 @@ sealed class PetArt : FrameworkElement
         Oval(dc, 40, 76, 3, 2, Peach);
 
         bool blink = Time % 4.7 > 4.55;
-        if (resting || blink && Activity == Play.None)
+        if (IsBeingDragged)
+        {
+            Oval(dc, 63, 66, 4.5, 6.5, Mint);
+            Oval(dc, 91, 66, 4.5, 6.5, Mint);
+        }
+        else if (resting || blink && Activity == Play.None)
         {
             Shape(dc, "M58,66 Q63,72 68,66 M85,66 Q90,72 95,66", null, Mint, 2.5);
         }
-        else if (Activity is Play.Pat or Play.Dance or Play.Wake or Play.Rub or Play.HighFive || chewing
-            || Mood == Mood.Done && Activity == Play.None)
+        else if (Activity is Play.Pat or Play.Dance or Play.Wake or Play.Rub or Play.HighFive || chewing)
         {
             Shape(dc, "M58,67 Q63,58 69,67 M85,67 Q91,58 96,67", null, Mint, 2.8);
         }
@@ -122,10 +174,12 @@ sealed class PetArt : FrameworkElement
             bool looks = Activity == Play.None;
             double x = looks ? eyeX : 0;
             double y = looks ? eyeY : 0;
-            Oval(dc, 63 + x, 66 + y, 3.5, Mood == Mood.Question ? 6.6 : 5, Mint);
+            Oval(dc, 63 + x, 66 + y, 3.5, 5, Mint);
             Oval(dc, 91 + x, 66 + y, 3.5, 5, Mint);
         }
-        if (chewing)
+        if (IsBeingDragged)
+            Oval(dc, 77, 75, 3.1, 2.5 + Math.Abs(wiggle) * 1.8, Mint);
+        else if (chewing)
             Oval(dc, 77, 74, 3.6, 2 + Math.Abs(beat) * 3, Mint);
         else if (PointerPose == PointerPose.Sniff && Activity == Play.None)
             Oval(dc, 77 + eyeX * 0.7, 74 + Math.Sin(Time * 12), 2.6, 1.8, Mint);
@@ -136,37 +190,44 @@ sealed class PetArt : FrameworkElement
             Oval(dc, 56, 75, 3.5, 1.8, Peach);
             Oval(dc, 96, 75, 3.5, 1.8, Peach);
         }
-        if (Mood == Mood.Working && Activity == Play.None)
-        {
-            Shape(dc, "M44,94 L60,77 L89,77 L82,96 L48,99 Z", "#A99DF6", Ink, 2);
-            Shape(dc, "M55,93 L76,90", null, Cream, 1.7);
-            Oval(dc, 42 + Math.Sin(Time * 18) * 2, 89, 6.5, 5, Cream, Ink, 2);
-        }
         dc.Pop();
         dc.Pop();
         dc.Pop();
         DrawPlay(dc, progress, reach);
+        DrawRoamTrick(dc, roam);
+        if (IsBeingDragged)
+            Shape(dc, "M12,66 L21,70 M10,78 L19,78 M120,53 L126,47 M122,63 L131,60",
+                null, "#FFBE91", 2.2);
         if (Activity == Play.None && PointerPose == PointerPose.Paw)
             DrawPaw(dc, 106, 79 + Math.Sin(Time * 7) * 3, -15);
         if (FacingLeft) dc.Pop();
+    }
 
-        if (Mood == Mood.Approval)
+    private void DrawRoamTrick(DrawingContext dc, RoamPose pose)
+    {
+        switch (pose.Trick)
         {
-            Shape(dc, "M106,27 Q106,18 116,18 L125,18 Q133,18 133,27 L133,38 Q133,45 125,45 L118,45 L110,51 L111,44 Q106,42 106,37 Z", "#FFC185", Ink, 2);
-            Shape(dc, "M120,24 L120,34", null, Ink, 2.4);
-            Oval(dc, 120, 39, 1.4, 1.4, Ink);
+            case RoamTrick.Dribble:
+                double beat = Math.Abs(Math.Sin(pose.Progress * Math.PI * 4));
+                DrawPaw(dc, 111, 68 + (1 - beat) * 10, -25);
+                Oval(dc, 122, 105, 9 - beat * 3, 2, "#3D282744");
+                DrawBall(dc, 122, 97 - beat * 30, "#FFA26E");
+                break;
+            case RoamTrick.Kick:
+                double flight = Math.Clamp((pose.Progress - 0.3) / 0.6, 0, 1);
+                dc.PushOpacity(1 - Math.Clamp((pose.Progress - 0.76) / 0.22, 0, 1));
+                DrawBall(dc, 108 + flight * 24, 95 - Math.Sin(flight * Math.PI) * 31, "#B9F5D8");
+                dc.Pop();
+                break;
         }
-        if (Mood == Mood.Question)
-        {
-            Shape(dc, "M109,34 C109,23 126,23 127,32 C128,40 118,38 118,46", null, Purple, 4);
-            Oval(dc, 118, 54, 2.4, 2.4, Purple);
-        }
-        if (Mood == Mood.Done)
-        {
-            Shape(dc, "M15,34 L19,43 L27,47 L19,51 L15,60 L11,51 L3,47 L11,43 Z", Mint);
-            Shape(dc, "M119,19 L122,28 L131,31 L122,34 L119,43 L116,34 L107,31 L116,28 Z", Peach);
-            Oval(dc, 121, 61, 2.5, 2.5, Purple);
-        }
+    }
+
+    private void DrawBall(DrawingContext dc, double x, double y, string color)
+    {
+        dc.PushTransform(new TranslateTransform(x, y));
+        Oval(dc, 0, 0, 8, 8, color, Ink, 1.7);
+        Shape(dc, "M-7,1 Q-1,-3 7,0 M-2,-7 Q3,-1 2,7", null, Ink, 1.1);
+        dc.Pop();
     }
 
     private void DrawPlay(DrawingContext dc, double progress, double reach)

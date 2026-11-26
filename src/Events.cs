@@ -10,10 +10,11 @@ using System.Threading.Tasks;
 
 namespace XunXun;
 
-enum Mood { Roam, Working, Approval, Question, Done, Interrupted, Ended }
+// Preserve values sent by older versions of the registered hook executable.
+enum Mood { Roam = 0, Approval = 2, Question = 3, Done = 4, Interrupted = 5, Ended = 6, PromptResolved = 7 }
 
 sealed record Notice(string Provider, string Session, Mood Mood, bool Demo,
-    string Project, long Window, uint Pid, long Started, string? Link = null)
+    string Project, long Window, uint Pid, long Started, string? Link = null, string? Tool = null)
 {
     public static Notice Sample(string provider, Mood mood) =>
         new(provider, "sample", mood, true,
@@ -65,13 +66,13 @@ static class Relay
             var tool = Field(json, "tool_name");
             var mood = eventName switch
             {
-                "UserPromptSubmit" or "PostToolUse" or "ElicitationResult" => Mood.Working,
-                "PermissionRequest" when tool == "AskUserQuestion" => Mood.Question,
+                "PermissionRequest" or "PreToolUse" when tool == "AskUserQuestion" => Mood.Question,
                 "PermissionRequest" => Mood.Approval,
-                "PreToolUse" when tool == "AskUserQuestion" => Mood.Question,
+                "PostToolUse" when tool is not null => Mood.PromptResolved,
                 "Elicitation" => Mood.Question,
+                "ElicitationResult" => Mood.PromptResolved,
                 "Stop" => Mood.Done,
-                "Interrupt" => Mood.Interrupted,
+                "Interrupt" or "UserPromptSubmit" => Mood.Interrupted,
                 "SessionEnd" => Mood.Ended,
                 _ => Mood.Roam
             };
@@ -82,7 +83,7 @@ static class Relay
             long.TryParse(Environment.GetEnvironmentVariable("XUNXUN_HWND"), out long window);
             uint.TryParse(Environment.GetEnvironmentVariable("XUNXUN_PID"), out uint pid);
             long.TryParse(Environment.GetEnvironmentVariable("XUNXUN_STARTED"), out long started);
-            var item = new Notice(provider, session, mood, false, project, window, pid, started);
+            var item = new Notice(provider, session, mood, false, project, window, pid, started, Tool: tool);
 
             using var pipe = new NamedPipeClientStream(".", pipeName ?? Name, PipeDirection.Out);
             pipe.Connect(300);
