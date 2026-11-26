@@ -13,7 +13,7 @@ namespace XunXun;
 enum Mood { Roam, Working, Approval, Question, Done, Interrupted, Ended }
 
 sealed record Notice(string Provider, string Session, Mood Mood, bool Demo,
-    string Project, long Window, uint Pid, long Started)
+    string Project, long Window, uint Pid, long Started, string? Link = null)
 {
     public static Notice Sample(string provider, Mood mood) =>
         new(provider, "sample", mood, true,

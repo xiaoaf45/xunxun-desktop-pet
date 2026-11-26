@@ -1,9 +1,10 @@
 using System;
+using System.Linq;
 using System.Windows;
 
 namespace XunXun;
 
-sealed class DesktopRoam
+sealed class DesktopRoam(Random? random = null)
 {
     private const double NoticeRadius = 210;
     private const double FollowRadius = 410;
@@ -11,33 +12,49 @@ sealed class DesktopRoam
     internal const double CompactScale = 0.50;
     private static readonly double[] DetourAngles = { 32, -32, 52, -52, 66, -66 };
 
+    private readonly Random random = random ?? Random.Shared;
     private Point? destination;
+    private string? destinationDisplay;
     private double pickAt;
     private double pauseUntil;
     private Point? pointerSample;
     private double sampleAt;
     private double followUntil;
 
+    internal readonly record struct Display(string Name, Rect Frame, Rect Walk);
+
+    internal readonly record struct Crossing(Point Entrance, Point Exit, bool Horizontal)
+    {
+        public Point Aim(Point position)
+        {
+            bool aligned = Horizontal
+                ? Math.Abs(position.Y - Entrance.Y) < 0.01
+                : Math.Abs(position.X - Entrance.X) < 0.01;
+            double forward = (position - Entrance) * (Exit - Entrance);
+            return aligned && forward >= -0.01 ? Exit : Entrance;
+        }
+    }
+
     public void Reset(double time)
     {
         destination = null;
+        destinationDisplay = null;
         pauseUntil = 0;
         pointerSample = null;
         sampleAt = time + 0.8;
         followUntil = 0;
     }
 
-    public bool TrackPointer(Point position, Point pointer, Rect workArea, double time)
+    public bool TrackPointer(Point position, Point pointer, bool reachable, double time)
     {
         double distance = (pointer - position).LengthSquared;
-        bool onScreen = workArea.Contains(pointer);
         bool following = time < followUntil;
-        if (!onScreen || distance > FollowRadius * FollowRadius) followUntil = 0;
+        if (!reachable || distance > FollowRadius * FollowRadius) followUntil = 0;
 
         if (time >= sampleAt)
         {
             double radius = following ? FollowRadius : NoticeRadius;
-            if (onScreen && pointerSample is { } previous && (pointer - previous).LengthSquared >= 9
+            if (reachable && pointerSample is { } previous && (pointer - previous).LengthSquared >= 9
                 && distance <= radius * radius)
                 followUntil = time + 2.2;
             pointerSample = pointer;
@@ -46,15 +63,48 @@ sealed class DesktopRoam
         return time < followUntil;
     }
 
-    public Point Step(Point position, Rect bounds, double time, double frame, Point? pointer, Rect[] icons)
+    internal static Crossing? FindCrossing(Point position, Rect source, Rect target, Rect sourceWalk, Rect targetWalk)
     {
-        if (!bounds.Contains(position))
-            return MoveTowards(position, Clamp(position, bounds), 58 * frame);
+        // Use the monitor edges for adjacency and the work-area margins for the crossing route.
+        if (Near(source.Right, target.Left) || Near(source.Left, target.Right))
+        {
+            double top = Math.Max(sourceWalk.Top, targetWalk.Top);
+            double bottom = Math.Min(sourceWalk.Bottom, targetWalk.Bottom);
+            if (top < bottom)
+            {
+                double y = Math.Clamp(position.Y, top, bottom);
+                bool right = Near(source.Right, target.Left);
+                return new Crossing(new Point(right ? sourceWalk.Right : sourceWalk.Left, y),
+                    new Point(right ? targetWalk.Left : targetWalk.Right, y), true);
+            }
+        }
+        if (Near(source.Bottom, target.Top) || Near(source.Top, target.Bottom))
+        {
+            double left = Math.Max(sourceWalk.Left, targetWalk.Left);
+            double right = Math.Min(sourceWalk.Right, targetWalk.Right);
+            if (left < right)
+            {
+                double x = Math.Clamp(position.X, left, right);
+                bool down = Near(source.Bottom, target.Top);
+                return new Crossing(new Point(x, down ? sourceWalk.Bottom : sourceWalk.Top),
+                    new Point(x, down ? targetWalk.Top : targetWalk.Bottom), false);
+            }
+        }
+        return null;
+    }
 
+    private static bool Near(double first, double second) => Math.Abs(first - second) < 1.5;
+
+    public Point Step(Point position, Rect bounds, double time, double frame, Point? pointer, Rect[] icons,
+        Crossing? crossing = null, Display? currentDisplay = null, Display[]? displays = null)
+    {
         if (pointer is { } target)
         {
             destination = null;
+            destinationDisplay = null;
             pauseUntil = 0;
+            if (crossing is { } route)
+                return MoveTowards(position, route.Aim(position), FollowSpeed * frame);
             var offset = target - position;
             double distance = offset.Length;
             if (distance <= 45) return position;
@@ -62,22 +112,69 @@ sealed class DesktopRoam
             return MoveTowards(position, stop, FollowSpeed * frame);
         }
 
+        double speed = 58 + 10 * Math.Sin(time * 0.55);
+        if (destinationDisplay is { } planned && currentDisplay is { } active)
+        {
+            if (planned == active.Name)
+            {
+                destinationDisplay = null;
+                pickAt = time + 3.5 + random.NextDouble() * 5;
+            }
+            else if (displays is not null)
+            {
+                var nextDisplay = displays.FirstOrDefault(display => display.Name == planned);
+                if (nextDisplay.Name is not null
+                    && FindCrossing(position, active.Frame, nextDisplay.Frame, bounds, nextDisplay.Walk) is { } route)
+                    return WanderAcross(position, bounds, speed * frame, icons, route);
+                destinationDisplay = null;
+                destination = null;
+            }
+        }
+        if (!bounds.Contains(position))
+            return MoveTowards(position, Clamp(position, bounds), 58 * frame);
+
         if (time < pauseUntil) return position;
         if (destination is { } last && (last - position).Length < 12)
         {
             destination = null;
-            pauseUntil = time + 0.3 + Random.Shared.NextDouble() * 0.8;
+            pauseUntil = time + 0.3 + random.NextDouble() * 0.8;
             return position;
         }
         if (destination is null || time >= pickAt || !bounds.Contains(destination.Value))
         {
-            destination = new Point(bounds.Left + Random.Shared.NextDouble() * bounds.Width,
-                bounds.Top + Random.Shared.NextDouble() * bounds.Height);
-            pickAt = time + 3.5 + Random.Shared.NextDouble() * 5;
+            if (currentDisplay is { } source && displays is { Length: > 1 } && random.NextDouble() < 0.36)
+            {
+                var neighbours = displays.Where(display => display.Name != source.Name)
+                    .Select(display => (Display: display, Route: FindCrossing(position,
+                        source.Frame, display.Frame, bounds, display.Walk)))
+                    .Where(choice => choice.Route.HasValue).ToArray();
+                if (neighbours.Length != 0)
+                {
+                    var other = neighbours[random.Next(neighbours.Length)];
+                    if (other.Route is { } route)
+                    {
+                        destinationDisplay = other.Display.Name;
+                        destination = RandomPoint(other.Display.Walk);
+                        return WanderAcross(position, bounds, speed * frame, icons, route);
+                    }
+                }
+            }
+            destination = RandomPoint(bounds);
+            pickAt = time + 3.5 + random.NextDouble() * 5;
         }
 
-        double speed = 58 + 10 * Math.Sin(time * 0.55);
         return WanderToward(position, destination.Value, bounds, speed * frame, icons);
+    }
+
+    private Point RandomPoint(Rect bounds) =>
+        new(bounds.Left + random.NextDouble() * bounds.Width, bounds.Top + random.NextDouble() * bounds.Height);
+
+    private static Point WanderAcross(Point position, Rect bounds, double step, Rect[] icons, Crossing route)
+    {
+        var aim = route.Aim(position);
+        return aim == route.Entrance && bounds.Contains(position)
+            ? WanderToward(position, aim, bounds, step, icons)
+            : MoveTowards(position, aim, step);
     }
 
     internal static Point WanderToward(Point position, Point target, Rect bounds, double step, Rect[] icons)

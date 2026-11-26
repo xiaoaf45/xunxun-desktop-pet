@@ -1,7 +1,9 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -31,6 +33,7 @@ static class Program
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         var window = new PetWindow();
         _ = Relay.Listen(item => window.Dispatcher.InvokeAsync(() => window.Receive(item)), Relay.Name, shutdown.Token);
+        _ = T3Completion.Watch(item => window.Dispatcher.InvokeAsync(() => window.Receive(item)), shutdown.Token);
         app.Exit += (_, _) => shutdown.Cancel();
         window.Show();
         if (!Array.Exists(args, arg => arg == "--live")) window.StartDemo();
@@ -48,6 +51,9 @@ static class Program
             {
                 await CheckRelay();
                 CheckRoaming();
+                CheckDisplayCrossing();
+                bool nativeCrossing = await CheckNativeCrossing(window);
+                CheckT3Completion();
                 CheckHighFivePointer();
                 var iconBounds = await Task.Run(DesktopIcons.Read).WaitAsync(TimeSpan.FromSeconds(6));
                 Require(!ReferenceEquals(PetCursors.Open, System.Windows.Input.Cursors.Hand)
@@ -56,6 +62,11 @@ static class Program
                 SavePreview(window, Path.Combine(directory, "xunxun-preview.png"));
                 window.Receive(Notice.Sample("Codex CLI", Mood.Interrupted));
                 SavePlayPreview(window, Path.Combine(directory, "xunxun-play.png"));
+                var t3Notice = new Notice(T3Completion.Provider, "test-thread", Mood.Done, false,
+                    "T3 completion test", 0, 0, 0, "https://app.t3.codes/threads/test-env/test-thread");
+                window.Receive(t3Notice);
+                Require(window.Current == t3Notice && window.OpenButton.IsEnabled, "T3 completion card could not open its thread");
+                window.Receive(t3Notice with { Mood = Mood.Interrupted });
                 var demo = Notice.Sample("Claude Code", Mood.Approval);
                 window.Receive(demo);
                 window.StartPlay(Play.Nap);
@@ -77,7 +88,8 @@ static class Program
                     Require(WindowsNative.GetForegroundWindow() == handle, "Wrong foreground window");
                 }
                 File.WriteAllText(Path.Combine(directory, "self-test.txt"),
-                    "PASS: relay mappings, notice and play visuals, cursor assets, high-five pointer, roaming, icon detour and sizing, pointer pursuit, reminder during play, stale target guard. "
+                    "PASS: relay mappings, T3 completion filtering, notice and play visuals, cursor assets, high-five pointer, roaming, icon detour and sizing, cross-display pursuit and roaming, reminder during play, stale target guard. "
+                    + (nativeCrossing ? "PASS: two physical displays crossed using replayed pointer positions. " : "")
                     + $"Desktop icon bounds read: {iconBounds.Length}. "
                     + (activated ? "PASS: native foreground." : "UNVERIFIED: Windows did not grant foreground to automated run."));
                 app.Shutdown(0);
@@ -122,7 +134,7 @@ static class Program
         var cluster = new[] { new Rect(80, 84, 76, 56), new Rect(156, 84, 76, 73),
             new Rect(80, 168, 76, 56), new Rect(156, 168, 76, 73) };
         walker.Reset(0);
-        Require(!walker.TrackPointer(dropped, target, bounds, 0.4), "Drag release kicked off a chase");
+        Require(!walker.TrackPointer(dropped, target, bounds.Contains(target), 0.4), "Drag release kicked off a chase");
         var roaming = dropped;
         for (int frame = 0; frame < 90; frame++)
         {
@@ -131,14 +143,14 @@ static class Program
             roaming = next;
         }
         Require((roaming - dropped).Length > 1, "Pet remained at the drop");
-        Require(!walker.TrackPointer(dropped, new Point(540, 155), bounds, 1.0)
-            && walker.TrackPointer(dropped, target, bounds, 1.15), "Nearby mouse movement failed to start pursuit");
+        Require(!walker.TrackPointer(dropped, new Point(540, 155), true, 1.0)
+            && walker.TrackPointer(dropped, target, true, 1.15), "Nearby mouse movement failed to start pursuit");
         var chasing = dropped;
         for (int frame = 0; frame < 36; frame++)
             chasing = walker.Step(chasing, bounds, 1.15 + frame / 30d, 1 / 30d, target, cluster);
         Require(Math.Abs(chasing.X - 295) < 0.01 && chasing.Y == dropped.Y,
             "Pursuit failed to cross the area and stop short of the cursor");
-        Require(!walker.TrackPointer(chasing, target, bounds, 3.5), "Pursuit did not expire after the mouse stopped");
+        Require(!walker.TrackPointer(chasing, target, true, 3.5), "Pursuit did not expire after the mouse stopped");
         Require(DesktopRoam.ScaleFor(dropped, dropped, cluster) == DesktopRoam.CompactScale
             && DesktopRoam.ScaleFor(new Point(350, 155), new Point(352, 155), cluster) == 1,
             "Pet did not shrink near the icon cluster and restore its size after it");
@@ -147,6 +159,117 @@ static class Program
             [new Rect(188, 128, 60, 44)]);
         Require(detour.X > beforeIcon.X && Math.Abs(detour.Y - beforeIcon.Y) > 0.8,
             "Pet did not detour around the isolated icon");
+    }
+
+    private static void CheckDisplayCrossing()
+    {
+        var left = new Rect(-1920, 0, 1920, 1080);
+        var right = new Rect(0, 0, 1920, 1080);
+        var leftWalk = new Rect(-1855, 71, 1790, 877);
+        var rightWalk = new Rect(65, 71, 1790, 877);
+        var leftDisplay = new DesktopRoam.Display("left", left, leftWalk);
+        var rightDisplay = new DesktopRoam.Display("right", right, rightWalk);
+        DesktopRoam.Display[] displays = [leftDisplay, rightDisplay];
+        foreach (int direction in new[] { 1, -1 })
+        {
+            var walker = new DesktopRoam();
+            var position = new Point(-100 * direction, 400);
+            var pointer = new Point(110 * direction, 400);
+            Require(!walker.TrackPointer(position, new Point(-185 * direction, 400), true, 0)
+                && walker.TrackPointer(position, pointer, true, 0.1), "Pointer lost across the seam");
+            for (int tick = 0; tick < 55; tick++)
+            {
+                bool onLeft = position.X < 0;
+                var crossing = onLeft != (pointer.X < 0)
+                    ? DesktopRoam.FindCrossing(position, onLeft ? left : right, onLeft ? right : left,
+                        onLeft ? leftWalk : rightWalk, onLeft ? rightWalk : leftWalk)
+                    : null;
+                var next = walker.Step(position, onLeft ? leftWalk : rightWalk,
+                    tick / 30d, 1 / 30d, pointer, [], crossing);
+                Require((next.X - position.X) * direction >= -0.001 && (next - position).Length <= 5.01,
+                    "Pet jumped or walked backwards during a screen crossing");
+                position = next;
+            }
+            Require(position.X * direction >= 64.9, "Pet stopped at the display seam");
+
+            walker = new DesktopRoam(new Random(1));
+            position = new Point(-100 * direction, 400);
+            for (int tick = 0; tick < 160; tick++)
+            {
+                var active = position.X < 0 ? leftDisplay : rightDisplay;
+                var next = walker.Step(position, active.Walk, tick / 30d, 1 / 30d, null, [],
+                    currentDisplay: active, displays: displays);
+                Require((next - position).Length <= 2.3, "Cross-display roaming teleported or sprinted");
+                position = next;
+            }
+            Require(position.X * direction >= 65, "Roaming never reached the adjacent screen without a pointer");
+        }
+
+        var offset = new Rect(0, 380, 1920, 1080);
+        var offsetWalk = new Rect(65, 451, 1790, 877);
+        var start = new Point(-100, 320);
+        var route = DesktopRoam.FindCrossing(start, left, offset, leftWalk, offsetWalk);
+        Require(route is { } path && path.Aim(start).Y == 451 && path.Aim(path.Entrance) == path.Exit,
+            "Offset displays did not route through the overlapping edge");
+        Require(DesktopRoam.FindCrossing(start, left, new Rect(50, 0, 1920, 1080), leftWalk, rightWalk) is null,
+            "Pet routed across a gap with no monitor");
+    }
+
+    private static void CheckT3Completion()
+    {
+        var clock = DateTimeOffset.Parse("2026-11-26T00:00:00Z");
+        const string link = "https://app.t3.codes/threads/test-env/test-thread";
+        var thread = new T3Completion.ThreadState("thread", "Test", link, "completed", "run1",
+            clock.AddMinutes(-1), null, [], false);
+        var tracker = new T3Completion.Tracker();
+        Require(!tracker.Observe([thread], clock).Any(), "Historical T3 task emitted a notice");
+        var running = thread with { Status = "running", LatestRunId = "run2" };
+        Require(!tracker.Observe([running], clock.AddSeconds(1)).Any(), "Running T3 task emitted a notice");
+        var pending = new JsonElement[1];
+        Require(!tracker.Observe(
+            [running with { Status = "completed", PendingBackgroundTasks = pending }], clock.AddSeconds(2)).Any(),
+            "T3 task emitted before its background work finished");
+        var finished = running with { Status = "completed" };
+        var received = tracker.Observe([finished], clock.AddSeconds(3)).Single();
+        Require(received is { Provider: T3Completion.Provider, Mood: Mood.Done, Link: link }
+            && !tracker.Observe([finished], clock.AddSeconds(4)).Any()
+            && T3Completion.ThreadLink(link) is not null
+            && T3Completion.ThreadLink("https://example.com/threads/test-env/test-thread") is null,
+            "T3 completion did not emit once with the verified thread link");
+    }
+
+    private static async Task<bool> CheckNativeCrossing(PetWindow window)
+    {
+        var pair = System.Windows.Forms.Screen.AllScreens.OrderBy(screen => screen.Bounds.Left).ToArray();
+        if (pair.Length != 2 || pair[0].Bounds.Right != pair[1].Bounds.Left) return false;
+        int top = Math.Max(pair[0].WorkingArea.Top, pair[1].WorkingArea.Top);
+        int bottom = Math.Min(pair[0].WorkingArea.Bottom, pair[1].WorkingArea.Bottom);
+        if (bottom - top < 320) return false;
+
+        var previous = window.ScreenAnchor;
+        int seam = pair[0].Bounds.Right;
+        var mouse = System.Windows.Forms.Cursor.Position;
+        int y = Math.Abs(mouse.Y - (top + 144)) > 150 ? top + 144 : bottom - 144;
+        try
+        {
+            foreach (int direction in new[] { 1, -1 })
+            {
+                double time = direction == 1 ? 1 : 5;
+                window.PlaceAnchor(new Point(seam - 125 * direction, y), time);
+                await System.Windows.Threading.Dispatcher.Yield();
+                window.AdvanceMotion(new System.Drawing.Point(seam - 310 * direction, y), time + 0.9, 0);
+                var target = new System.Drawing.Point(seam + 70 * direction, y);
+                for (int tick = 0; tick < 53; tick++)
+                {
+                    window.AdvanceMotion(target, time + 1.02 + tick / 30d, 1 / 30d);
+                    await System.Windows.Threading.Dispatcher.Yield();
+                }
+                Require((window.ScreenAnchor.X - seam) * direction >= 20,
+                    "The native window did not follow the replayed pointer across the physical display seam");
+            }
+            return true;
+        }
+        finally { window.PlaceAnchor(previous, 10); }
     }
 
     private static async Task CheckRelay()

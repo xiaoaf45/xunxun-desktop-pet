@@ -54,6 +54,7 @@ sealed class PetWindow : Window
     private Task<Rect[]>? iconsRead;
     private Rect[] iconPixels = Array.Empty<Rect>();
     private Rect[] icons = Array.Empty<Rect>();
+    private DesktopRoam.Display[] displays = [];
     private Rect workArea;
     private Point press;
     private Play pressAction;
@@ -313,9 +314,11 @@ sealed class PetWindow : Window
             Mood.Question => "测试工作区 · 请选择要验证的范围",
             _ => "测试工作区 · 可以回去查看结果"
         } : string.IsNullOrEmpty(item.Project) ? "从已接入会话收到的提醒" : item.Project;
-        bool linked = item.Demo || item.Window != 0;
+        bool t3 = item.Provider == T3Completion.Provider;
+        bool linked = item.Demo || item.Window != 0 || t3 && T3Completion.ThreadLink(item.Link) is not null;
         open.IsEnabled = linked;
-        open.Content = item.Demo ? "回到任务  ↗" : linked ? "切到任务窗口  ↗" : "未绑定窗口";
+        open.Content = item.Demo ? "回到任务  ↗"
+            : t3 && linked ? "打开 T3 会话  ↗" : linked ? "切到任务窗口  ↗" : "未绑定窗口";
         next.Content = $"下一条  {pending.Length - 1}";
         next.Visibility = pending.Length > 1 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -340,8 +343,7 @@ sealed class PetWindow : Window
             playTray.Visibility = Visibility.Collapsed;
         if (dragging && Mouse.LeftButton == MouseButtonState.Released) dragging = false;
         MoveHighFivePointer();
-        UpdateDesktop(elapsed);
-        UpdatePointerAndWalk(elapsed, frame);
+        AdvanceMotion(Forms.Cursor.Position, elapsed, frame);
         pet.InvalidateVisual();
         if (DateTime.UtcNow < cleanupAt) return;
         cleanupAt = DateTime.UtcNow.AddSeconds(30);
@@ -350,6 +352,25 @@ sealed class PetWindow : Window
             .Select(pair => pair.Key).ToArray();
         foreach (var key in expired) sessions.Remove(key);
         if (expired.Length != 0) Refresh();
+    }
+
+    internal Point ScreenAnchor => PointToScreen(new Point(AnchorX, AnchorY));
+
+    internal void PlaceAnchor(Point pixel, double elapsed)
+    {
+        var next = DesktopPoint(pixel);
+        Left = next.X - AnchorX;
+        Top = next.Y - AnchorY;
+        nextWorkAreaRead = 0;
+        roam.Reset(elapsed);
+    }
+
+    internal void AdvanceMotion(System.Drawing.Point cursor, double elapsed, double frame)
+    {
+        var point = ScreenAnchor;
+        var screen = Forms.Screen.FromPoint(new System.Drawing.Point((int)point.X, (int)point.Y));
+        UpdateDesktop(elapsed, screen);
+        UpdatePointerAndWalk(cursor, elapsed, frame, screen);
     }
 
     private void MoveHighFivePointer()
@@ -376,7 +397,7 @@ sealed class PetWindow : Window
         pet.Cursor = PetCursors.Open;
     }
 
-    private void UpdateDesktop(double elapsed)
+    private void UpdateDesktop(double elapsed, Forms.Screen screen)
     {
         bool refreshed = iconsRead is { IsCompleted: true };
         if (refreshed)
@@ -390,13 +411,12 @@ sealed class PetWindow : Window
             nextIconsRead = elapsed + 4;
             iconsRead = Task.Run(DesktopIcons.Read);
         }
+        workArea = DesktopRect(screen.WorkingArea);
         if (!refreshed && elapsed < nextWorkAreaRead) return;
         nextWorkAreaRead = elapsed + 1;
-        var screen = PointToScreen(new Point(AnchorX, AnchorY));
-        var area = Forms.Screen.FromPoint(new System.Drawing.Point((int)screen.X, (int)screen.Y)).WorkingArea;
-        workArea = new Rect(DesktopPoint(new Point(area.Left, area.Top)), DesktopPoint(new Point(area.Right, area.Bottom)));
-        icons = iconPixels.Select(box => new Rect(DesktopPoint(box.TopLeft), DesktopPoint(box.BottomRight)))
-            .Where(box => box.IntersectsWith(workArea)).ToArray();
+        icons = iconPixels.Select(box => new Rect(DesktopPoint(box.TopLeft), DesktopPoint(box.BottomRight))).ToArray();
+        displays = Forms.Screen.AllScreens.Select(display => new DesktopRoam.Display(display.DeviceName,
+            DesktopRect(display.Bounds), WalkBounds(DesktopRect(display.WorkingArea)))).ToArray();
     }
 
     private Point DesktopPoint(Point pixel)
@@ -405,14 +425,28 @@ sealed class PetWindow : Window
         return new Point(Left + local.X, Top + local.Y);
     }
 
-    private void UpdatePointerAndWalk(double elapsed, double frame)
+    private Rect DesktopRect(System.Drawing.Rectangle pixels) =>
+        new(DesktopPoint(new Point(pixels.Left, pixels.Top)), DesktopPoint(new Point(pixels.Right, pixels.Bottom)));
+
+    private static Rect WalkBounds(Rect work) =>
+        new(work.Left + Math.Min(65, work.Width / 4), work.Top + Math.Min(71, work.Height / 4),
+            Math.Max(1, work.Width - 130), Math.Max(1, work.Height - 155));
+
+    private void UpdatePointerAndWalk(System.Drawing.Point cursor, double elapsed, double frame, Forms.Screen screen)
     {
-        var cursor = Forms.Cursor.Position;
         var pointer = DesktopPoint(new Point(cursor.X, cursor.Y));
         var position = new Point(Left + AnchorX, Top + AnchorY);
         Vector towardsPointer = pointer - position;
         bool near = towardsPointer.LengthSquared < 125 * 125;
-        bool following = roam.TrackPointer(position, pointer, workArea, elapsed);
+        var bounds = WalkBounds(workArea);
+        var activeDisplay = new DesktopRoam.Display(screen.DeviceName, DesktopRect(screen.Bounds), bounds);
+        var pointerScreen = Forms.Screen.FromPoint(cursor);
+        var pointerArea = DesktopRect(pointerScreen.WorkingArea);
+        bool sameScreen = screen.Equals(pointerScreen);
+        var crossing = sameScreen ? null : DesktopRoam.FindCrossing(position,
+            activeDisplay.Frame, DesktopRect(pointerScreen.Bounds), bounds, WalkBounds(pointerArea));
+        bool following = roam.TrackPointer(position, pointer,
+            pointerArea.Contains(pointer) && (sameScreen || crossing is not null), elapsed);
         pet.LookAt = near || following ? towardsPointer : default;
         pet.PointerPose = PointerPose.None;
         if (pet.Activity == Play.None && !dragging)
@@ -433,9 +467,8 @@ sealed class PetWindow : Window
             return;
         }
 
-        var bounds = new Rect(workArea.Left + 65, workArea.Top + 71,
-            Math.Max(1, workArea.Width - 130), Math.Max(1, workArea.Height - 155));
-        var target = roam.Step(position, bounds, elapsed, frame, following ? pointer : null, icons);
+        var target = roam.Step(position, bounds, elapsed, frame, following ? pointer : null, icons,
+            crossing, activeDisplay, displays);
         ResizePet(DesktopRoam.ScaleFor(position, target, icons), frame);
         Vector movement = target - position;
         if (movement.LengthSquared < 0.01) return;
@@ -530,6 +563,13 @@ sealed class PetWindow : Window
     private void Jump()
     {
         if (current is not { } item) return;
+        if (item.Provider == T3Completion.Provider)
+        {
+            if (T3Completion.ThreadLink(item.Link) is not { } link) return;
+            try { Process.Start(new ProcessStartInfo(link.AbsoluteUri) { UseShellExecute = true }); }
+            catch (System.ComponentModel.Win32Exception) { detail.Text = "无法打开 T3 Code 会话链接"; }
+            return;
+        }
         if (!item.Demo)
         {
             if (WindowsNative.BringForward(item)) detail.Text = "已切到任务窗口";
