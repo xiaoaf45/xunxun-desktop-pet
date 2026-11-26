@@ -41,6 +41,7 @@ static class HookSetupWindow
             check.Unchecked += (_, _) => accept.IsEnabled = choices.Any(choice => choice.Check.IsChecked == true);
             body.Children.Add(Tile(check));
         }
+        body.Children.Add(Wrapped("确认后会把接收程序保存到当前用户目录。", 11, "#ABAACB", new Thickness(0, 4, 0, 0)));
         if (targets.Any(target => target.Cli == "codex"))
             body.Children.Add(Wrapped("Codex 注册后需在 /hooks 中审查并信任。", 11, "#ABAACB", new Thickness(0, 4, 0, 0)));
 

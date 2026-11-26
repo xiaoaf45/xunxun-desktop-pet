@@ -125,11 +125,18 @@ static class Program
     {
         string testRoot = Path.Combine(directory, "hook-fixtures-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(testRoot);
-        string executable = Path.Combine(testRoot, "XunXun's test", "XunXun.exe");
+        string archiveCopy = Path.Combine(testRoot, "360zip$Temp", "360$0", "XunXun.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(archiveCopy)!);
+        byte[] relayFixture = [1, 2, 3];
+        File.WriteAllBytes(archiveCopy, relayFixture);
+        string executable = Path.Combine(testRoot, "Local user's app data", "HookRelay", "XunXun.exe");
+        HookRegistration.InstallRelay(archiveCopy, executable);
+        var targets = new System.Collections.Generic.List<HookRegistration.Target>();
         foreach (var cli in new[] { "claude", "codex" })
         {
             string path = Path.Combine(testRoot, cli + ".json");
             var target = new HookRegistration.Target(cli, cli, path);
+            targets.Add(target);
             Require(!HookRegistration.Registered(target, executable) && !File.Exists(path),
                 "The startup check changed an unregistered configuration");
             const string baseConfig = """{"description":"existing","hooks":{"Stop":[{"matcher":"*","hooks":[{"type":"command","command":"existing command"}]}]}}""";
@@ -142,7 +149,7 @@ static class Program
                 {
                     var legacy = new System.Text.Json.Nodes.JsonObject
                     {
-                        ["type"] = "command", ["timeout"] = 3, ["command"] = executable
+                        ["type"] = "command", ["timeout"] = 3, ["command"] = archiveCopy
                     };
                     if (retainedArgs) legacy["args"] = new System.Text.Json.Nodes.JsonArray("--hook", "claude");
                     stop.Add(new System.Text.Json.Nodes.JsonObject
@@ -177,18 +184,12 @@ static class Program
             Require(File.ReadAllText(backup) == original && !HookRegistration.Register(target, executable)
                 && File.ReadAllText(path) == written, "Hook installation was not atomic and idempotent");
 
-            var relocated = Path.Combine(testRoot, "updated", "XunXun.exe");
-            Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
-            File.WriteAllBytes(executable, []);
-            Require(HookRegistration.Registered(target, relocated) && !HookRegistration.Register(target, relocated),
-                "Opening another portable copy caused a working hook to be registered again");
-            File.Delete(executable);
-            Require(!HookRegistration.Registered(target, relocated) && HookRegistration.Register(target, relocated),
-                "The installer did not repair an old executable path");
-            using var updated = JsonDocument.Parse(File.ReadAllText(path));
-            Require(updated.RootElement.GetProperty("hooks").GetProperty("Stop").GetArrayLength() == 2,
-                "Repairing the executable path added a second copy of the hook");
         }
+        File.Delete(archiveCopy);
+        Require(File.ReadAllBytes(executable).SequenceEqual(relayFixture)
+            && targets.All(target => HookRegistration.Registered(target, executable)
+                && !HookRegistration.Register(target, executable)),
+            "Clearing the archive path broke an installed relay or triggered another registration");
         var broken = new HookRegistration.Target("Claude Code", "claude", Path.Combine(testRoot, "broken.json"));
         File.WriteAllText(broken.File, "{ invalid");
         try

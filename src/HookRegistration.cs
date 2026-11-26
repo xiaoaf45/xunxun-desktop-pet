@@ -38,6 +38,7 @@ static class HookRegistration
             && !string.Equals(Path.GetFileName(processPath), "dotnet.exe", StringComparison.OrdinalIgnoreCase)
             ? processPath : Path.Combine(AppContext.BaseDirectory, "XunXun.exe");
         if (!File.Exists(executable)) return;
+        string relayExecutable = Path.Combine(AppDataDirectory, "HookRelay", "XunXun.exe");
 
         var targets = new[] {
             UserTarget("Claude Code", "claude", "CLAUDE_CONFIG_DIR", ".claude", "settings.json", profile),
@@ -52,7 +53,7 @@ static class HookRegistration
             try
             {
                 if ((!manual && skipped.Contains(target.Cli)) || !Installed(target.Cli, installDirectories)) continue;
-                if (!Registered(target, executable)) missing.Add(target);
+                if (!File.Exists(relayExecutable) || !Registered(target, relayExecutable)) missing.Add(target);
             }
             catch (Exception error) when (ConfigError(error))
             {
@@ -77,12 +78,19 @@ static class HookRegistration
         WriteSkipped(skipped);
         if (approved.Length == 0) return;
 
+        try { InstallRelay(executable, relayExecutable); }
+        catch (Exception error) when (ConfigError(error))
+        {
+            HookSetupWindow.Report(owner, "Hook 注册结果", [$"无法保存巡巡的 Hook 接收程序。请检查此目录的访问权限。\n{relayExecutable}"]);
+            return;
+        }
+
         var result = new List<string>();
         foreach (var target in approved)
         {
             try
             {
-                Register(target, executable);
+                Register(target, relayExecutable);
                 result.Add(target.Cli == "codex"
                     ? "Codex CLI 已注册。请重新打开会话，并在 /hooks 中审查并信任巡巡的 Hook。"
                     : Read(target.File).Document["disableAllHooks"] is JsonValue flag
@@ -100,6 +108,23 @@ static class HookRegistration
 
     internal static bool Registered(Target target, string executable) =>
         !Merge(Read(target.File).Document, target, executable);
+
+    internal static void InstallRelay(string source, string destination)
+    {
+        if (string.Equals(source, destination, StringComparison.OrdinalIgnoreCase)) return;
+        if (ReadBytes(destination) is { } installed
+            && installed.AsSpan().SequenceEqual(File.ReadAllBytes(source))) return;
+
+        string directory = Path.GetDirectoryName(destination)!;
+        Directory.CreateDirectory(directory);
+        string temporary = Path.Combine(directory, $".relay-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.Copy(source, temporary);
+            File.Move(temporary, destination, overwrite: true);
+        }
+        finally { File.Delete(temporary); }
+    }
 
     internal static bool Register(Target target, string executable)
     {
@@ -176,7 +201,7 @@ static class HookRegistration
                          select (Group: matchGroup, Handlers: handlers, Handler: handler, Path: path)).ToArray();
             var working = owned.FirstOrDefault(entry => CoversMatcher(entry.Group, matcher)
                 && IsObserver(entry.Handler, Observer(codex, entry.Path!))
-                && (string.Equals(entry.Path, executable, StringComparison.OrdinalIgnoreCase) || File.Exists(entry.Path)));
+                && string.Equals(entry.Path, executable, StringComparison.OrdinalIgnoreCase));
             JsonObject? keep = working.Handler;
             if (keep is null)
             {
@@ -333,10 +358,11 @@ static class HookRegistration
     private static bool ConfigError(Exception error) =>
         error is IOException or UnauthorizedAccessException or JsonException or ArgumentException;
 
-    private static string PreferenceFile => Path.Combine(
+    private static string AppDataDirectory => Path.Combine(
         Environment.GetEnvironmentVariable("LOCALAPPDATA")
         ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "XunXun", "skipped-hooks.json");
+        "XunXun");
+    private static string PreferenceFile => Path.Combine(AppDataDirectory, "skipped-hooks.json");
 
     private static HashSet<string> ReadSkipped()
     {

@@ -23,7 +23,7 @@
 
 巡巡启动时查找 Claude Code 和 Codex 的 CLI 启动器。已安装且缺失提醒 Hook 的工具会列在弹窗里，可以勾选后注册。注册会在原配置目录保留修改前的备份。Codex CLI 还需重开会话，在 `/hooks` 审查并信任巡巡的 Hook。Claude Code 可提醒结构化提问、待审批和本轮结束，Codex CLI 的 Hook 接入目前覆盖待审批和本轮结束。
 
-Claude Code 的 Windows Hook 使用兼容的 PowerShell 启动命令。更新巡巡后，若弹窗提示注册，确认一次即可迁移旧条目并合并同事件的多条巡巡 Hook。每种事件保留一条巡巡 Hook，其他 Hook 会保留。暂不接入的工具可从巡巡右键菜单的 **设置任务提醒** 再次选择。迁移后重开 Claude Code，确保它与巡巡在同一 Windows 用户会话里运行。
+Claude Code 的 Windows Hook 使用兼容的 PowerShell 启动命令。自动注册会把接收程序保存为 `%LOCALAPPDATA%\XunXun\HookRelay\XunXun.exe`。更新巡巡后，若弹窗提示注册，确认一次即可迁移旧条目并合并同事件的多条巡巡 Hook。每种事件保留一条巡巡 Hook，其他 Hook 会保留。暂不接入的工具可从巡巡右键菜单的 **设置任务提醒** 再次选择。迁移后重开 Claude Code，确保它与巡巡在同一 Windows 用户会话里运行。
 
 双击 `release\XunXun.exe` 可开始监听。若要生成手动配置样例，从原型根目录运行以下命令。样例包含当前可执行文件的绝对路径，移动程序后可重新生成。
 
