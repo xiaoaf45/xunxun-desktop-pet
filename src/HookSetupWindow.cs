@@ -15,7 +15,8 @@ static class HookSetupWindow
     {
         var body = new StackPanel();
         var accept = PetWindow.Action("注册所选 Hook", true);
-        var later = PetWindow.Action("稍后", false);
+        var later = PetWindow.Action("暂不接入", false);
+        later.ToolTip = "可以从巡巡的右键菜单再次接入。";
         AutomationProperties.SetAutomationId(accept, "hook-accept");
         AutomationProperties.SetAutomationId(later, "hook-later");
         later.IsCancel = true;

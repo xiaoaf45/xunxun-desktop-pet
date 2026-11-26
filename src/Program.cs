@@ -18,6 +18,12 @@ static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if (args is ["--claude-hook-command"])
+        {
+            using var output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false));
+            output.WriteLine(HookRegistration.ClaudeCommand(Environment.ProcessPath!));
+            return 0;
+        }
         if (args is ["--hook", "claude" or "codex"])
         {
             Relay.FromHook(args[1] == "claude" ? "Claude Code" : "Codex CLI", Console.OpenStandardInput());
@@ -126,7 +132,26 @@ static class Program
             var target = new HookRegistration.Target(cli, cli, path);
             Require(!HookRegistration.Registered(target, executable) && !File.Exists(path),
                 "The startup check changed an unregistered configuration");
-            const string original = """{"theme":"dark","hooks":{"Stop":[{"matcher":"*","hooks":[{"type":"command","command":"existing command"}]}]}}""";
+            const string baseConfig = """{"description":"existing","hooks":{"Stop":[{"matcher":"*","hooks":[{"type":"command","command":"existing command"}]}]}}""";
+            string original = baseConfig;
+            if (cli == "claude")
+            {
+                var fixture = System.Text.Json.Nodes.JsonNode.Parse(baseConfig)!;
+                var stop = fixture["hooks"]!["Stop"]!.AsArray();
+                foreach (bool retainedArgs in new[] { true, false, false })
+                {
+                    var legacy = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["type"] = "command", ["timeout"] = 3, ["command"] = executable
+                    };
+                    if (retainedArgs) legacy["args"] = new System.Text.Json.Nodes.JsonArray("--hook", "claude");
+                    stop.Add(new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["hooks"] = new System.Text.Json.Nodes.JsonArray(legacy)
+                    });
+                }
+                original = fixture.ToJsonString();
+            }
             File.WriteAllText(path, original);
             Require(HookRegistration.Register(target, executable) && HookRegistration.Registered(target, executable),
                 "The hook installation did not complete");
@@ -134,9 +159,16 @@ static class Program
             using var json = JsonDocument.Parse(written);
             var root = json.RootElement;
             var entries = root.GetProperty("hooks").GetProperty("Stop");
-            Require(root.GetProperty("theme").GetString() == "dark" && entries.GetArrayLength() == 2
+            Require(root.GetProperty("description").GetString() == "existing" && entries.GetArrayLength() == 2
                 && entries[0].GetProperty("hooks")[0].GetProperty("command").GetString() == "existing command",
                 "An existing setting or hook was overwritten");
+            if (cli == "claude")
+            {
+                var observer = entries[1].GetProperty("hooks")[0];
+                Require(!observer.TryGetProperty("args", out _)
+                    && observer.GetProperty("command").GetString() == HookRegistration.ClaudeCommand(executable),
+                    "An older executable hook was duplicated or kept its legacy arguments");
+            }
             var hooks = root.GetProperty("hooks");
             Require(hooks.GetProperty("PermissionRequest").GetArrayLength() == 1
                 && (cli != "claude" || hooks.GetProperty("PreToolUse")[0].GetProperty("matcher").GetString()
@@ -146,6 +178,11 @@ static class Program
                 && File.ReadAllText(path) == written, "Hook installation was not atomic and idempotent");
 
             var relocated = Path.Combine(testRoot, "updated", "XunXun.exe");
+            Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+            File.WriteAllBytes(executable, []);
+            Require(HookRegistration.Registered(target, relocated) && !HookRegistration.Register(target, relocated),
+                "Opening another portable copy caused a working hook to be registered again");
+            File.Delete(executable);
             Require(!HookRegistration.Registered(target, relocated) && HookRegistration.Register(target, relocated),
                 "The installer did not repair an old executable path");
             using var updated = JsonDocument.Parse(File.ReadAllText(path));

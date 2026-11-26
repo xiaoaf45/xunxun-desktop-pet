@@ -173,6 +173,7 @@ sealed class PetWindow : Window
 
         var menu = new ContextMenu();
         AddMenu(menu, "播放提醒演示", StartDemo);
+        AddMenu(menu, "设置任务提醒", () => HookRegistration.Offer(this, manual: true));
         var mute = new MenuItem { Header = "免打扰", IsCheckable = true };
         mute.Click += (_, _) => SetQuiet(mute.IsChecked);
         menu.Items.Add(mute);
@@ -283,6 +284,7 @@ sealed class PetWindow : Window
     {
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("播放提醒演示", null, (_, _) => StartDemo());
+        menu.Items.Add("设置任务提醒", null, (_, _) => HookRegistration.Offer(this, manual: true));
         var mute = new Forms.ToolStripMenuItem("免打扰") { CheckOnClick = true };
         mute.CheckedChanged += (_, _) => SetQuiet(mute.Checked);
         menu.Opening += (_, _) => mute.Checked = quiet;

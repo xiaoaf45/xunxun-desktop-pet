@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading;
 using System.Windows;
 
 namespace XunXun;
@@ -16,10 +19,19 @@ static class HookRegistration
     private static readonly (string Name, string? Matcher)[] ClaudeQuestions =
         [("PreToolUse", QuestionMatcher), ("Elicitation", null), ("ElicitationResult", null)];
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
+    private const string ClaudeShellPrefix = "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ";
+    private const string ClaudeScriptPrefix = "$observer = '";
+    private const string ClaudeScriptSuffix = "'\n"
+        + "if (Test-Path -LiteralPath $observer -PathType Leaf) {\n"
+        + "  $utf8 = [Text.UTF8Encoding]::new($false)\n"
+        + "  [Console]::InputEncoding = $utf8\n"
+        + "  $OutputEncoding = $utf8\n"
+        + "  [Console]::In.ReadToEnd() | & $observer --hook claude | Out-Null\n"
+        + "}\nexit 0\n";
 
     internal sealed record Target(string Name, string Cli, string File);
 
-    public static void Offer(Window owner)
+    public static void Offer(Window owner, bool manual = false)
     {
         var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         string executable = Environment.ProcessPath is { } processPath
@@ -33,12 +45,13 @@ static class HookRegistration
         };
         var missing = new List<Target>();
         var unavailable = new List<string>();
+        var skipped = ReadSkipped();
         var installDirectories = InstallDirectories(profile).ToArray();
         foreach (var target in targets)
         {
             try
             {
-                if (!Installed(target.Cli, installDirectories)) continue;
+                if ((!manual && skipped.Contains(target.Cli)) || !Installed(target.Cli, installDirectories)) continue;
                 if (!Registered(target, executable)) missing.Add(target);
             }
             catch (Exception error) when (ConfigError(error))
@@ -48,9 +61,20 @@ static class HookRegistration
         }
         if (unavailable.Count > 0)
             HookSetupWindow.Report(owner, "Hook 配置检查", unavailable);
-        if (missing.Count == 0) return;
+        if (missing.Count == 0)
+        {
+            if (manual && unavailable.Count == 0)
+                HookSetupWindow.Report(owner, "任务提醒", ["没有需要注册的已安装工具。"]);
+            return;
+        }
 
         var approved = HookSetupWindow.Ask(owner, missing, profile);
+        foreach (var target in missing)
+        {
+            if (approved.Contains(target)) skipped.Remove(target.Cli);
+            else skipped.Add(target.Cli);
+        }
+        WriteSkipped(skipped);
         if (approved.Length == 0) return;
 
         var result = new List<string>();
@@ -78,6 +102,19 @@ static class HookRegistration
         !Merge(Read(target.File).Document, target, executable);
 
     internal static bool Register(Target target, string executable)
+    {
+        string path = Path.GetFullPath(target.File);
+        string lockId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(path.ToUpperInvariant())));
+        using var gate = new Mutex(false, @"Global\XunXun-Hook-" + lockId);
+        bool locked;
+        try { locked = gate.WaitOne(TimeSpan.FromSeconds(4)); }
+        catch (AbandonedMutexException) { locked = true; }
+        if (!locked) throw new IOException("Another XunXun instance is registering hooks.");
+        try { return WriteRegistration(target with { File = path }, executable); }
+        finally { gate.ReleaseMutex(); }
+    }
+
+    private static bool WriteRegistration(Target target, string executable)
     {
         for (int attempt = 0; attempt < 3; attempt++)
         {
@@ -130,28 +167,48 @@ static class HookRegistration
                 _ => throw new JsonException("Expected an array of hook matchers.")
             };
             var wanted = Observer(codex, executable);
-            var existing = groups.OfType<JsonObject>().Where(group => CoversMatcher(group, matcher))
-                .SelectMany(group => (group["hooks"] as JsonArray)?.OfType<JsonObject>()
-                    ?? Enumerable.Empty<JsonObject>()).ToArray();
-            if (existing.Any(handler => IsObserver(handler, wanted))) continue;
-
-            // Update a known older XunXun path in place after consent.
-            var previous = existing.FirstOrDefault(handler => PreviousPath(handler, codex) is { } path
-                && IsObserver(handler, Observer(codex, path)));
-            if (previous is null)
+            var owned = (from matchGroup in groups.OfType<JsonObject>()
+                         where matchGroup["hooks"] is JsonArray
+                         let handlers = (JsonArray)matchGroup["hooks"]!
+                         from handler in handlers.OfType<JsonObject>()
+                         let path = OwnedPath(handler, codex, executable)
+                         where path is not null
+                         select (Group: matchGroup, Handlers: handlers, Handler: handler, Path: path)).ToArray();
+            var working = owned.FirstOrDefault(entry => CoversMatcher(entry.Group, matcher)
+                && IsObserver(entry.Handler, Observer(codex, entry.Path!))
+                && (string.Equals(entry.Path, executable, StringComparison.OrdinalIgnoreCase) || File.Exists(entry.Path)));
+            JsonObject? keep = working.Handler;
+            if (keep is null)
             {
-                var group = new JsonObject { ["hooks"] = new JsonArray(wanted) };
-                if (matcher is not null) group["matcher"] = matcher;
-                groups.Add(group);
+                keep = owned.FirstOrDefault(entry => CoversMatcher(entry.Group, matcher)).Handler;
+                if (keep is null)
+                {
+                    var group = new JsonObject { ["hooks"] = new JsonArray(wanted) };
+                    if (matcher is not null) group["matcher"] = matcher;
+                    groups.Add(group);
+                    keep = wanted;
+                }
+                else
+                {
+                    keep["command"] = wanted["command"]!.DeepClone();
+                    if (codex)
+                        keep[keep.ContainsKey("command_windows") ? "command_windows" : "commandWindows"]
+                            = wanted["commandWindows"]!.DeepClone();
+                    else
+                    {
+                        keep.Remove("args");
+                        keep["timeout"] = wanted["timeout"]!.DeepClone();
+                    }
+                }
+                changed = true;
             }
-            else
+            foreach (var entry in owned)
             {
-                previous["command"] = wanted["command"]!.DeepClone();
-                if (codex)
-                    previous[previous.ContainsKey("command_windows") ? "command_windows" : "commandWindows"]
-                        = wanted["commandWindows"]!.DeepClone();
+                if (ReferenceEquals(entry.Handler, keep)) continue;
+                entry.Handlers.Remove(entry.Handler);
+                if (entry.Handlers.Count == 0) groups.Remove(entry.Group);
+                changed = true;
             }
-            changed = true;
         }
         return changed;
     }
@@ -168,22 +225,31 @@ static class HookRegistration
         }
         else
         {
-            handler["command"] = executable;
-            handler["args"] = new JsonArray("--hook", "claude");
+            handler["command"] = ClaudeCommand(executable);
+            handler["timeout"] = 5;
         }
         return handler;
     }
 
     private static bool IsObserver(JsonObject handler, JsonObject wanted) =>
         Value(handler["type"]) == "command"
-        && string.Equals(Value(handler["command"]), Value(wanted["command"]), StringComparison.OrdinalIgnoreCase)
+        && string.Equals(Value(handler["command"]), Value(wanted["command"]),
+            wanted.ContainsKey("commandWindows") ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
         && string.Equals(Value(handler["commandWindows"] ?? handler["command_windows"]),
             Value(wanted["commandWindows"]), StringComparison.OrdinalIgnoreCase)
         && JsonNode.DeepEquals(handler["args"], wanted["args"])
         && handler["if"] is null;
 
-    private static string? PreviousPath(JsonObject handler, bool codex)
+    internal static string ClaudeCommand(string executable)
     {
+        // Bash and PowerShell both pass the encoded argument literally, including paths with spaces or punctuation.
+        string script = ClaudeScriptPrefix + executable.Replace("'", "''") + ClaudeScriptSuffix;
+        return ClaudeShellPrefix + Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+    }
+
+    private static string? OwnedPath(JsonObject handler, bool codex, string current)
+    {
+        if (Value(handler["type"]) != "command" || handler["if"] is not null) return null;
         var path = Value(handler["command"]);
         if (codex)
         {
@@ -193,8 +259,26 @@ static class HookRegistration
                 && command.EndsWith(suffix, StringComparison.Ordinal)
                 ? command[3..^suffix.Length].Replace("''", "'") : null;
         }
-        return path is not null && Path.IsPathFullyQualified(path)
-            && string.Equals(Path.GetFileName(path), "XunXun.exe", StringComparison.OrdinalIgnoreCase) ? path : null;
+        else if (path is not null && path.StartsWith(ClaudeShellPrefix, StringComparison.Ordinal))
+        {
+            try
+            {
+                string script = Encoding.Unicode.GetString(Convert.FromBase64String(path[ClaudeShellPrefix.Length..]));
+                path = script.StartsWith(ClaudeScriptPrefix, StringComparison.Ordinal)
+                    && script.EndsWith(ClaudeScriptSuffix, StringComparison.Ordinal)
+                    ? script[ClaudeScriptPrefix.Length..^ClaudeScriptSuffix.Length].Replace("''", "'") : null;
+            }
+            catch (FormatException) { return null; }
+        }
+        if (path is null || !Path.IsPathFullyQualified(path)
+            || (!string.Equals(path, current, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(Path.GetFileName(path), "XunXun.exe", StringComparison.OrdinalIgnoreCase))) return null;
+        if (IsObserver(handler, Observer(codex, path))) return path;
+        if (!codex && string.Equals(Value(handler["command"]), path, StringComparison.OrdinalIgnoreCase)
+            && (JsonNode.DeepEquals(handler["args"], new JsonArray("--hook", "claude"))
+                || handler["args"] is null && handler["timeout"] is JsonValue time
+                    && time.TryGetValue<int>(out var seconds) && seconds == 3)) return path;
+        return null;
     }
 
     private static bool CoversMatcher(JsonObject group, string? matcher) =>
@@ -248,4 +332,31 @@ static class HookRegistration
 
     private static bool ConfigError(Exception error) =>
         error is IOException or UnauthorizedAccessException or JsonException or ArgumentException;
+
+    private static string PreferenceFile => Path.Combine(
+        Environment.GetEnvironmentVariable("LOCALAPPDATA")
+        ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "XunXun", "skipped-hooks.json");
+
+    private static HashSet<string> ReadSkipped()
+    {
+        try
+        {
+            return new HashSet<string>(JsonSerializer.Deserialize<string[]>(ReadBytes(PreferenceFile) ?? "[]"u8.ToArray())
+                ?? [], StringComparer.Ordinal);
+        }
+        catch (Exception error) when (ConfigError(error)) { return new HashSet<string>(StringComparer.Ordinal); }
+    }
+
+    private static void WriteSkipped(HashSet<string> skipped)
+    {
+        if (skipped.SetEquals(ReadSkipped())) return;
+        try
+        {
+            string file = PreferenceFile;
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            File.WriteAllText(file, JsonSerializer.Serialize(skipped));
+        }
+        catch (Exception error) when (ConfigError(error)) { }
+    }
 }

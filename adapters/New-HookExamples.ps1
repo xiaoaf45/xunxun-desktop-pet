@@ -16,7 +16,9 @@ function Add-Observer($Config, $EventName, $Handler, $Matcher) {
 }
 
 $claude = @{ hooks = [ordered]@{} }
-$claudeHook = @{ type = 'command'; command = $appPath; args = @('--hook', 'claude'); timeout = 3 }
+$claudeCommand = (& $appPath --claude-hook-command | Out-String).Trim()
+if (-not $claudeCommand.StartsWith('powershell.exe ')) { throw 'The executable did not return a compatible Claude Hook command.' }
+$claudeHook = @{ type = 'command'; command = $claudeCommand; timeout = 5 }
 foreach ($name in 'UserPromptSubmit', 'PermissionRequest', 'PostToolUse', 'Elicitation', 'ElicitationResult', 'Stop', 'SessionEnd') {
     Add-Observer $claude $name $claudeHook
 }
