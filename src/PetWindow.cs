@@ -353,7 +353,7 @@ sealed class PetWindow : Window
         bool linked = item.Demo || item.Window != 0 || t3 && T3Completion.ThreadLink(item.Link) is not null;
         open.IsEnabled = linked;
         open.Content = item.Demo ? "回到任务  ↗"
-            : t3 && linked ? "打开 T3 会话  ↗" : linked ? "切到任务窗口  ↗" : "未绑定窗口";
+            : t3 && linked ? "回到 T3 Code  ↗" : linked ? "切到任务窗口  ↗" : "未绑定窗口";
         next.Content = $"下一条  {pending.Length - 1}";
         next.Visibility = pending.Length > 1 ? Visibility.Visible : Visibility.Collapsed;
         if (!preview && newlyShown) ShowNoticeWindow();
@@ -631,9 +631,7 @@ sealed class PetWindow : Window
         if (current is not { } item) return;
         if (item.Provider == T3Completion.Provider)
         {
-            if (T3Completion.ThreadLink(item.Link) is not { } link) return;
-            try { Process.Start(new ProcessStartInfo(link.AbsoluteUri) { UseShellExecute = true }); }
-            catch (System.ComponentModel.Win32Exception) { detail.Text = "无法打开 T3 Code 会话链接"; }
+            if (!T3Completion.OpenThread(item.Link)) detail.Text = "无法打开 T3 Code 会话链接";
             return;
         }
         if (!item.Demo)

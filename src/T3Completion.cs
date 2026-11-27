@@ -5,8 +5,10 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Win32;
 
 namespace XunXun;
 
@@ -14,6 +16,7 @@ static class T3Completion
 {
     public const string Provider = "T3 Code";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly Regex ThreadPath = new(@"\A/threads/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/?\z");
 
     internal sealed record ThreadState(string ThreadId, string? Title, string? Link, string? Status,
         string? LatestRunId, DateTimeOffset CreatedAt, string? RelationshipToParent,
@@ -116,5 +119,32 @@ static class T3Completion
     public static Uri? ThreadLink(string? link) =>
         Uri.TryCreate(link, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps
         && uri.Host == "app.t3.codes" && uri.IsDefaultPort && uri.UserInfo.Length == 0
-        && uri.AbsolutePath.StartsWith("/threads/", StringComparison.Ordinal) ? uri : null;
+        && uri.Query.Length == 0 && uri.Fragment.Length == 0 && ThreadPath.IsMatch(uri.AbsolutePath) ? uri : null;
+
+    internal static Uri DesktopThreadLink(Uri webLink) =>
+        new("t3code://" + webLink.AbsolutePath.TrimStart('/'));
+
+    public static bool OpenThread(string? link)
+    {
+        if (ThreadLink(link) is not { } webLink) return false;
+        using var handler = Registry.ClassesRoot.OpenSubKey(@"t3code\shell\open\command");
+        if (handler?.GetValue(null) is string { Length: > 0 })
+        {
+            // A terminal started by T3 can pass Electron's CLI mode to XunXun.
+            Environment.SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", null);
+            if (TryOpen(DesktopThreadLink(webLink))) return true;
+        }
+        return TryOpen(webLink);
+    }
+
+    private static bool TryOpen(Uri link)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo(link.AbsoluteUri) { UseShellExecute = true });
+            // ShellExecute may hand the URI to an existing app without returning a process.
+            return true;
+        }
+        catch (Win32Exception) { return false; }
+    }
 }

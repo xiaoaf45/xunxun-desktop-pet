@@ -105,7 +105,7 @@ static class Program
                     Require(WindowsNative.GetForegroundWindow() == handle, "Wrong foreground window");
                 }
                 File.WriteAllText(Path.Combine(directory, "self-test.txt"),
-                    "PASS: relay mappings, CLI hook registration, T3 completion filtering, notice and play visuals, autonomous play cycle, cursor assets, high-five pointer, roaming, icon detour and sizing, cross-display pursuit and roaming, reminder during play, stale target guard. "
+                    "PASS: relay mappings, CLI hook registration, T3 completion filtering and desktop links, notice and play visuals, autonomous play cycle, cursor assets, high-five pointer, roaming, icon detour and sizing, cross-display pursuit and roaming, reminder during play, stale target guard. "
                     + (nativeCrossing ? "PASS: two physical displays crossed using replayed pointer positions. " : "")
                     + $"Desktop icon bounds read: {iconBounds.Length}. "
                     + (activated ? "PASS: native foreground." : "UNVERIFIED: Windows did not grant foreground to automated run."));
@@ -330,7 +330,7 @@ static class Program
     {
         var clock = DateTimeOffset.Parse("2026-11-26T00:00:00Z");
         const string link = "https://app.t3.codes/threads/test-env/test-thread";
-        var thread = new T3Completion.ThreadState("thread", "Test", link, "completed", "run1",
+        var thread = new T3Completion.ThreadState("test-thread", "Test", link, "completed", "run1",
             clock.AddMinutes(-1), null, [], false);
         var tracker = new T3Completion.Tracker();
         Require(!tracker.Observe([thread], clock).Any(), "Historical T3 task emitted a notice");
@@ -343,10 +343,15 @@ static class Program
         var finished = running with { Status = "completed" };
         var received = tracker.Observe([finished], clock.AddSeconds(3)).Single();
         Require(received is { Provider: T3Completion.Provider, Mood: Mood.Done, Link: link }
-            && !tracker.Observe([finished], clock.AddSeconds(4)).Any()
-            && T3Completion.ThreadLink(link) is not null
-            && T3Completion.ThreadLink("https://example.com/threads/test-env/test-thread") is null,
-            "T3 completion did not emit once with the verified thread link");
+            && !tracker.Observe([finished], clock.AddSeconds(4)).Any(),
+            "T3 completion did not emit once with its thread link");
+        Require(T3Completion.ThreadLink(link) is { } webLink
+            && T3Completion.DesktopThreadLink(webLink).AbsoluteUri == "t3code://threads/test-env/test-thread",
+            "T3 desktop link changed the thread address");
+        foreach (var invalid in new[] { link + "/extra", link + "?prompt=unexpected",
+            "https://app.t3.codes/threads/test-env/", "https://app.t3.codes/threads/test-env/%2f",
+            "https://example.com/threads/test-env/test-thread" })
+            Require(T3Completion.ThreadLink(invalid) is null, "Invalid T3 thread link was accepted");
     }
 
     private static async Task<bool> CheckNativeCrossing(PetWindow window)
