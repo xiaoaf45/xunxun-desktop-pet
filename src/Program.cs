@@ -91,6 +91,7 @@ static class Program
                 Require(window.CurrentPlay == Play.Wake, "Sleep control did not wake the pet");
                 Require(window.Current == demo && window.OpenButton.IsEnabled, "Approval action missing");
                 window.OpenButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                Require(window.Current is null, "Jumping to the demo left its reminder visible");
                 var handle = window.DemoHandle("Claude Code");
                 Require(handle != IntPtr.Zero && WindowsNative.IsWindowVisible(handle), "Demo target did not open");
                 var process = Process.GetCurrentProcess();
@@ -103,7 +104,14 @@ static class Program
                 {
                     await Task.Delay(100);
                     Require(WindowsNative.GetForegroundWindow() == handle, "Wrong foreground window");
+                    window.Receive(live);
+                    window.OpenButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                    Require(window.Current is null, "Jumping to the bound task left its reminder visible");
                 }
+                var stale = live with { Pid = live.Pid + 1 };
+                window.Receive(stale);
+                window.OpenButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+                Require(window.Current == stale, "A failed jump discarded the reminder");
                 File.WriteAllText(Path.Combine(directory, "self-test.txt"),
                     "PASS: relay mappings, CLI hook registration, T3 completion filtering and desktop links, notice and play visuals, autonomous play cycle, cursor assets, high-five pointer, roaming, icon detour and sizing, cross-display pursuit and roaming, reminder during play, stale target guard. "
                     + (nativeCrossing ? "PASS: two physical displays crossed using replayed pointer positions. " : "")

@@ -621,12 +621,12 @@ sealed class PetWindow : Window
         firstDemo.Start();
     }
 
-    private void Dismiss()
+    private void Dismiss(bool advanceDemo = true)
     {
         if (current is not { } item) return;
         sessions.Remove((item.Provider, item.Session, item.Demo));
         selection = 0;
-        if (item.Demo) DemoTo(demoStage + 1);
+        if (item.Demo && advanceDemo) DemoTo(demoStage + 1);
         else Refresh();
     }
 
@@ -648,12 +648,13 @@ sealed class PetWindow : Window
         if (current is not { } item) return;
         if (item.Provider == T3Completion.Provider)
         {
-            if (!T3Completion.OpenThread(item.Link)) detail.Text = "无法打开 T3 Code 会话链接";
+            if (T3Completion.OpenThread(item.Link)) Dismiss();
+            else detail.Text = "无法打开 T3 Code 会话链接";
             return;
         }
         if (!item.Demo)
         {
-            if (WindowsNative.BringForward(item)) detail.Text = "已切到任务窗口";
+            if (WindowsNative.BringForward(item)) Dismiss();
             else detail.Text = "窗口已关闭或 Windows 未能切换，请手动打开任务";
             return;
         }
@@ -674,12 +675,13 @@ sealed class PetWindow : Window
         var explain = Label("你已从巡巡的提醒切换到这个演示窗口。", 13, "#CECEE1");
         explain.Margin = new Thickness(0, 14, 0, 17);
         layout.Children.Add(explain);
+        int stage = demoStage;
         var action = Action(item.Mood == Mood.Done ? "结束演示" : "下一段演示  →", true);
         action.HorizontalAlignment = HorizontalAlignment.Left;
         action.Click += (_, _) =>
         {
             target.Close();
-            if (current == item) DemoTo(demoStage + 1);
+            if (demoStage == stage) DemoTo(stage + 1);
         };
         layout.Children.Add(action);
         target.Content = layout;
@@ -687,7 +689,7 @@ sealed class PetWindow : Window
         target.Closed += (_, _) => demoWindows.Remove(item.Provider);
         target.Show();
         target.Activate();
-        detail.Text = "已打开演示任务 · 在任务窗口继续下一段";
+        Dismiss(advanceDemo: false);
     }
 
     public IntPtr DemoHandle(string provider) => demoWindows.TryGetValue(provider, out var window)

@@ -55,6 +55,7 @@ static class HarnessLauncher
         }
         Remove-Item Env:XUNXUN_LAUNCH_* -ErrorAction SilentlyContinue
         & $tool @arguments
+        exit $LASTEXITCODE
         """;
 
     public static Tool[] AvailableTools()
@@ -91,7 +92,7 @@ static class HarnessLauncher
                 "--useApplicationTitle", "--inheritEnvironment" })
                 info.ArgumentList.Add(argument);
         foreach (var argument in new[] { Path.Combine(system, @"WindowsPowerShell\v1.0\powershell.exe"),
-            "-NoLogo", "-NoProfile", "-NoExit", "-Command", "& ([scriptblock]::Create($env:XUNXUN_LAUNCH_SCRIPT))" })
+            "-NoLogo", "-NoProfile", "-Command", "& ([scriptblock]::Create($env:XUNXUN_LAUNCH_SCRIPT))" })
             info.ArgumentList.Add(argument);
         info.Environment["XUNXUN_LAUNCH_SCRIPT"] = Startup;
         info.Environment["XUNXUN_LAUNCH_DIRECTORY"] = directory;
@@ -102,9 +103,23 @@ static class HarnessLauncher
         info.Environment["XUNXUN_LAUNCH_FLAG"] = noApproval ? tool.ApprovalFlag : "";
         info.Environment["XUNXUN_LAUNCH_VALUE"] = noApproval ? tool.ApprovalValue : "";
         info.Environment.Remove("ELECTRON_RUN_AS_NODE");
+        // The desktop terminal should use the user's color preferences, even when
+        // XunXun itself was started by a noninteractive coding runner.
+        UseDesktopEnvironment(info, "NO_COLOR");
+        if (info.Environment.TryGetValue("TERM", out var term)
+            && string.Equals(term, "dumb", StringComparison.OrdinalIgnoreCase))
+            UseDesktopEnvironment(info, "TERM");
         foreach (string variable in new[] { "XUNXUN_HWND", "XUNXUN_PID", "XUNXUN_STARTED" })
             info.Environment.Remove(variable);
         return info;
+    }
+
+    private static void UseDesktopEnvironment(ProcessStartInfo info, string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User)
+            ?? Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine);
+        if (value is null) info.Environment.Remove(name);
+        else info.Environment[name] = value;
     }
 
     internal static string? WindowsTerminal()
