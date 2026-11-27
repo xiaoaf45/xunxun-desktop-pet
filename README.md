@@ -51,7 +51,7 @@ Claude Code 和 Codex 的完成提醒来自 `Stop` Hook。它表示当前一轮�
 
 双击巡巡，或从巡巡和托盘的右键菜单选择 **启动 Claude / Codex**。选一个已安装的工具，再输入、浏览或从下拉列表选取项目路径。启动过的最近 12 个路径会记在本机，再次打开面板时默认填入上一次的路径。
 
-每次启动会新开一个独立的 Windows 控制台，从所选目录运行 CLI。连接好对应 Hook 后，点击任务气泡中的 **切到任务窗口**，巡巡会打开该会话所在的控制台。CLI 退出后，控制台会保留供你查看结果。
+每次启动会打开一个独立的 PowerShell 窗口，从所选目录运行 CLI。巡巡优先使用 Windows Terminal 显示 PowerShell，并启用 UTF-8。找不到 Windows Terminal 时使用 Windows 自带控制台。连接好对应 Hook 后，点击任务气泡中的 **切到任务窗口** 可回到该会话。CLI 退出后，PowerShell 会保留供你查看结果。
 
 **无需审批**默认关闭，关闭时沿用工具设置。勾选后仅本次会话生效。Claude Code 使用 `--permission-mode bypassPermissions`，Codex CLI 使用 `--ask-for-approval never` 并沿用现有沙箱权限。项目历史只记录路径。
 
