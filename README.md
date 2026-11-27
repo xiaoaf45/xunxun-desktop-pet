@@ -1,51 +1,126 @@
-# 巡巡 · Windows 桌宠原型
+# 巡巡 XunXun
 
-在 Windows 上按文末命令构建后，双击 `release\XunXun.exe` 即可开始漫游并监听已配置的任务提醒。这个 x64 单文件版需要 .NET 9 Desktop Runtime。
+巡巡是一个 Windows 桌宠。它会在桌面上散步、运动、跟你互动，也能把 Claude Code、Codex CLI 和 T3 Code 的任务提醒放到桌面上。
 
-1. 右键巡巡或托盘图标，选择 **播放提醒演示**，约两秒后会弹出模拟审批。也可以用 `--demo` 启动演示。
-2. 点击 **回到任务** 可打开模拟任务窗口。窗口里的 **下一段演示** 或气泡上的 × 可依次进入提问和完成提醒。
-3. 巡巡会随机游走，轮流小跳、拍球运球和踢球，也会挑相邻屏幕当目的地。遇到单个图标时，路线允许就轻轻绕一下。图标密集时会缩小，继续沿自己的方向散步。右键宠物或托盘图标，可以重播、切换免打扰或退出。
+![巡巡的审批、提问和完成气泡](preview/xunxun-preview.png)
 
-## 和巡巡玩
+## 先跑起来
 
-- **单击巡巡**可以摸头，它会眯眼、摇尾巴并冒爱心。**按住拖动**时它会扭身、晃耳朵、蹬脚，松手后继续漫游。
-- **在它附近移动鼠标**，巡巡闲着时会主动追过来，可以沿相邻显示器的公共边缘跨屏。经过图标会缩小穿过，接近指针后停下。指针移到它身上会变成一只小手。**来回滑动**可以挠痒。**停一会儿**，等巡巡伸爪，再点击就能击掌。击掌时小手会跟着爪子抬起，手动移动鼠标即可放开。
-- **喂食**会丢出一根胡萝卜，巡巡会接住嚼两口。**抛球**会让它跑去接球再回来。**跳舞**会让它踩着节拍蹦跳。
-- **小睡**会让它趴下打盹。再点一下巡巡，或点 **叫醒**，它会重新站起来。
+巡巡使用 .NET 9 和 WPF。当前构建产物是需要桌面运行时的 Windows x64 单文件程序。
 
-鼠标移到宠物身上即可呼出按钮。这些动作也可以在有任务提醒时使用。[互动预览](preview/xunxun-play.png)
-
-[审批、提问和完成提醒预览](preview/xunxun-preview.png)由原型界面直接渲染。演示窗口、动作和工作区名称都是模拟数据。
-
-气泡停在弹出的位置，巡巡继续漫游。每条提醒显示 10 秒倒计时，到时自动收起。多条提醒依次显示。
-
-## 接入本机 CLI
-
-巡巡启动时查找 Claude Code 和 Codex 的 CLI 启动器。已安装且缺失提醒 Hook 的工具会列在弹窗里，可以勾选后注册。注册会在原配置目录保留修改前的备份。Codex CLI 还需重开会话，在 `/hooks` 审查并信任巡巡的 Hook。Claude Code 可提醒结构化提问、待审批和本轮结束，Codex CLI 的 Hook 接入目前覆盖待审批和本轮结束。
-
-Claude Code 的 Windows Hook 使用明文 PowerShell 命令。自动注册会把接收程序保存为 `%LOCALAPPDATA%\XunXun\HookRelay\XunXun.exe`，并通过 `Join-Path` 定位。更新巡巡后，若弹窗提示注册，确认一次即可迁移旧条目并合并同事件的多条巡巡 Hook。每种事件保留一条巡巡 Hook，其他 Hook 会保留。暂不接入的工具可从巡巡右键菜单的 **设置任务提醒** 再次选择。迁移后重开 Claude Code，确保它与巡巡在同一 Windows 用户会话里运行。
-
-双击 `release\XunXun.exe` 可开始监听。若要生成手动配置样例，从原型根目录运行以下命令。样例包含当前可执行文件的绝对路径，移动程序后可重新生成。
+- **已有 `XunXun.exe`**。安装 [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0) 的 Windows x64 版本。若收到的是 ZIP，先把 EXE 解压到常用目录，再双击运行。
+- **从源码构建**。在 Windows 上安装 .NET 9 SDK，克隆仓库，在仓库根目录运行下面的命令。构建完成后双击 `release\XunXun.exe`。
 
 ```powershell
-.\adapters\New-HookExamples.ps1
-```
-
-- **Claude Code**。从前台 PowerShell 窗口运行 `.\adapters\Start-Harness.ps1 -Provider claude`。启动脚本通过 CLI 的 `--settings` 带入样例。手动样例使用支持 `shell: powershell` 的 Claude Code 版本。提问提醒来自 `AskUserQuestion` 和 MCP 结构化提问。[Claude Code Hooks](https://code.claude.com/docs/en/hooks)
-- **Codex CLI**。将生成的 `adapters/examples/codex-hooks.json` 条目合并进目标受信任项目的 `.codex/hooks.json`，保留已有条目。通过前台 PowerShell 运行 `.\adapters\Start-Harness.ps1 -Provider codex`，路径按原型位置填写，并在 Codex 的 `/hooks` 审查并信任这些条目。[Codex Hooks](https://learn.chatgpt.com/docs/hooks)
-
-在各 CLI 的独立终端窗口里执行启动脚本，以便提醒可以切回该窗口。Windows Terminal 共用窗口时会切回整个窗口，标签页需要手动选。通过其他方式启动并加载 Hook 时也可以收到提醒，窗口按钮需要启动时绑定。
-
-Hook 用当前用户和 Windows 会话内的命名管道转发会话 ID、事件类型、工作目录末级名称和窗口绑定信息。它不发送模型提示、命令正文和审批决定。收到回复结束事件表示该轮回复结束，任务结果在对应的 CLI 会话里查看。
-
-本机检查通过了模拟 Hook 载荷、原生提示、打开模拟任务窗口和前台切换。真实 CLI 流程需要在启用样例后联调。
-
-## T3 Code 完成提醒
-
-在 `XunXun.exe` 同目录创建 `t3-projects.json`，内容是要关注的 T3 Code 项目 ID 数组，然后重启巡巡。巡巡通过当前 Windows 用户的 `t3 thread list --json` 读取会话状态。启动时记录已有状态，之后在主会话变为完成且后台工作结束时提醒一次。气泡的 **打开 T3 会话** 使用 CLI 返回的会话网页链接。
-
-## 重新构建
-
-```powershell
+git clone https://github.com/xiaoaf45/xunxun-desktop-pet.git
+cd xunxun-desktop-pet
 dotnet publish .\src\XunXun.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=None -o .\release
 ```
+
+重新构建前可以用右键菜单的 **退出巡巡** 关闭正在运行的同一份 EXE。
+
+双击启动后，巡巡会自由漫游并监听已配置的任务提醒。想快速体验气泡，右键巡巡或系统托盘图标，选择 **播放提醒演示**。演示依次展示审批、提问和完成。点 **回到任务** 可进入模拟任务窗口，也可以直接用以下命令启动演示。
+
+```powershell
+Start-Process .\release\XunXun.exe -ArgumentList '--demo'
+```
+
+## 桌面互动
+
+- **漫游和运动**。巡巡会随机散步，轮流小跳、拍球运球和踢球，也会挑相邻屏幕当目的地。
+- **遇到桌面图标**。有空间时会轻轻绕开单个图标。图标密集或正在追鼠标时会缩小穿过，离开图标区后恢复原大小。
+- **追鼠标和摸头**。在它附近移动指针，它会凑过来，也能沿相邻屏幕的公共边缘追过去。指针移到它身上会变成一只小手。单击摸头，来回滑动挠痒。
+- **拖动和击掌**。按住拖动时它会扭身、晃耳朵、蹬腿，松手后继续漫游。悬停一会儿，等它伸爪再单击可以击掌。小手光标会随爪子抬起，手动移动鼠标可以放开。
+- **喂食、抛球、跳舞和小睡**。把鼠标移到它身上即可看到按钮。睡着后点击巡巡或点 **叫醒**，它会重新站起来。
+
+[查看动作预览](preview/xunxun-play.png)
+
+## 任务提醒
+
+任务进行中，巡巡照常漫游。需要提问、审批或任务完成时，气泡会停在弹出的位置，巡巡可以继续走。提醒逐条显示，每条从 10 秒开始倒数，可以提前点 × 收起。用右键菜单里的 **免打扰** 可暂时隐藏气泡。
+
+| 工具 | 结构化提问 | 待审批 | 完成 | 气泡入口 |
+| --- | --- | --- | --- | --- |
+| Claude Code | `AskUserQuestion` 和 MCP 结构化提问 | 工具权限请求 | 本轮回复结束 | 已绑定的终端窗口 |
+| Codex CLI | — | 工具权限请求 | 本轮回复结束 | 已绑定的终端窗口 |
+| T3 Code | — | — | 主会话和后台工作结束 | 对应会话网页 |
+
+Claude Code 和 Codex 的完成提醒来自 `Stop` Hook。它表示当前一轮回复结束，任务结果可回到原会话查看。工具审批仍由你在原工具里处理。
+
+### Claude Code 和 Codex CLI
+
+1. 在 Windows 上安装对应的 CLI，并启动巡巡。巡巡会检测已安装的 CLI，列出缺少或需要迁移的提醒 Hook。
+2. 在弹窗中勾选工具，再点击 **注册所选 Hook**。选择 **暂不接入** 后，可以用巡巡或托盘的右键菜单 **设置任务提醒** 再次打开。
+3. 重新打开 Claude Code 或 Codex 会话。Codex 还需在 `/hooks` 中审查并信任巡巡的 Hook。
+
+自动注册会合并巡巡的条目，保留已有的其他 Hook，并在原配置目录留一份修改前的备份。同一事件只保留一条由巡巡注册的 Hook。Claude Code 使用明文 PowerShell 命令，从当前用户的固定目录启动接收程序，因此把桌宠移动到其他目录后也能继续使用。
+
+| 内容 | 默认位置 |
+| --- | --- |
+| Claude Code 用户配置 | `%USERPROFILE%\.claude\settings.json`，可由 `CLAUDE_CONFIG_DIR` 指定目录 |
+| Codex CLI 用户 Hook | `%USERPROFILE%\.codex\hooks.json`，可由 `CODEX_HOME` 指定目录 |
+| 巡巡的固定接收程序 | `%LOCALAPPDATA%\XunXun\HookRelay\XunXun.exe` |
+
+[Claude Code Hooks](https://code.claude.com/docs/en/hooks) · [Codex Hooks](https://learn.chatgpt.com/docs/hooks)
+
+### 手动配置和终端绑定
+
+在仓库根目录运行脚本生成 Claude Code 和 Codex 的样例，输出在 `adapters/examples/`。样例引用指定 EXE 的绝对路径，移动程序后可重新生成。
+
+```powershell
+.\adapters\New-HookExamples.ps1 -Executable .\release\XunXun.exe
+```
+
+- **Claude Code**。从目标终端运行 `.\adapters\Start-Harness.ps1 -Provider claude`，以 `--settings` 加载样例。手动样例需要支持 `shell: powershell` 的 Claude Code 版本。
+- **Codex CLI**。将生成的 `codex-hooks.json` 中的条目合并进受信任项目的 `.codex/hooks.json`，再从目标终端运行 `.\adapters\Start-Harness.ps1 -Provider codex`，在 `/hooks` 中审查并信任。
+
+启动脚本会记录当前窗口，气泡中才会出现可用的 **切到任务窗口** 按钮。多个 Windows Terminal 标签页共用一个窗口时，进入窗口后可手动切到相应标签页。已使用用户级自动注册时，可直接从对应 CLI 接收提醒，生成样例适用于有手动配置需求的场景。
+
+### T3 Code
+
+确保当前 Windows 用户能运行 `t3` CLI。在 `XunXun.exe` 同目录创建 `t3-projects.json`，写入要关注的项目 ID 数组，再重启巡巡。
+
+```json
+[
+  "00000000-0000-0000-0000-000000000001"
+]
+```
+
+将示例值换成实际项目 ID。可以先用 `t3 thread list --json --project <项目 ID>` 确认 CLI 能读取对应项目。
+
+巡巡会轮询配置中的项目，启动时先记录已有状态，后续在主会话及后台工作结束时提醒一次。点击 **打开 T3 会话** 会使用 CLI 返回的会话网页链接。
+
+## 排查提醒
+
+- **旧版配置指向压缩包临时目录**。退出旧巡巡，把新版 EXE 解压到常用目录再启动。确认一次迁移后，配置会改为固定接收程序的路径，并合并重复的巡巡条目。
+- **Claude Code 未收到提醒**。检查实际启动 CLI 的 Windows 用户与巡巡是否处在同一会话，确认 CLI 使用的配置目录与注册窗口显示的目录一致，重开 CLI 后再试。
+- **Codex Hook 已写入**。重开 Codex，在 `/hooks` 查看巡巡条目及其信任状态。
+- **T3 Code 未收到提醒**。核对 `t3-projects.json` 与 EXE 同目录，使用实际项目 ID，并在终端确认 `t3 thread list` 能读到该项目。
+
+Claude Code 和 Codex 的 Hook 通过当前用户和会话的 Windows 命名管道转发会话 ID、事件类型、工作目录末级名称和窗口绑定信息。T3 Code 的状态来自本机 CLI。
+
+## 项目结构和自测
+
+| 路径 | 用途 |
+| --- | --- |
+| [`src/`](src) | WPF 桌宠、动作绘制、窗口与气泡、Hook 注册和接收、T3 Code 完成提醒 |
+| [`src/Assets/`](src/Assets) | 应用图标和鼠标指针资源 |
+| [`adapters/`](adapters) | Hook 样例生成和终端启动脚本 |
+| [`preview/`](preview) | 自测生成的桌宠动作和模拟提醒预览 |
+
+构建后可运行内置自测，报告及预览图会写到指定目录。
+
+```powershell
+$testDir = Join-Path (Get-Location).Path 'src\obj\xunxun-self-test'
+$result = Start-Process -FilePath .\release\XunXun.exe -ArgumentList @(
+    '--self-test', ('"{0}"' -f $testDir)
+) -Wait -PassThru
+Get-Content -LiteralPath (Join-Path $testDir 'self-test.txt') -Encoding UTF8
+if ($result.ExitCode -ne 0) { throw '巡巡自测失败。' }
+```
+
+自测覆盖 Hook 注册与迁移、事件转发、动作轮换、桌面图标避让和双屏路线。双屏窗口切换等依赖本机桌面环境的检查会在报告里单独说明。
+
+## 许可证
+
+本项目采用 [MIT 许可证](LICENSE)。
