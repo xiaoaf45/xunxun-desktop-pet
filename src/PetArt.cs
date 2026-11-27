@@ -5,7 +5,7 @@ using System.Windows.Media;
 
 namespace XunXun;
 
-enum Play { None, Pat, Feed, Fetch, Dance, Nap, Wake, Rub, HighFive }
+enum Play { None, Pat, Feed, Fetch, Dance, Nap, Wake, Rub, HighFive, Drink, Stretch }
 enum PointerPose { None, Sniff, Paw }
 enum RoamTrick { None, Hop, Dribble, Kick }
 
@@ -50,6 +50,8 @@ static class PlayTiming
         Play.Wake => 0.8,
         Play.Rub => 1.45,
         Play.HighFive => 1.15,
+        Play.Drink => 2.25,
+        Play.Stretch => 2.3,
         _ => 0
     };
 }
@@ -112,6 +114,8 @@ sealed class PetArt : FrameworkElement
             Play.Wake => (0.0, -reach * 17, beat * 6 * reach, 1 + reach * 0.12),
             Play.Rub => (beat * reach * 4, -Math.Abs(beat) * 6, beat * reach * 10, 1 - reach * 0.06),
             Play.HighFive => (0.0, -reach * 8, reach * -8, 1.0),
+            Play.Drink => (0.0, -reach * 3, reach * 5, 1.0),
+            Play.Stretch => (0.0, -reach * 9, -reach * 5, 1 + reach * 0.17),
             Play.None when PointerPose == PointerPose.Sniff =>
                 (eyeX * 0.6, Math.Sin(Time * 12) * 1.6, eyeX * 1.9, 1.0),
             _ => (0.0, 0.0, 0.0, 1.0)
@@ -165,7 +169,7 @@ sealed class PetArt : FrameworkElement
         {
             Shape(dc, "M58,66 Q63,72 68,66 M85,66 Q90,72 95,66", null, Mint, 2.5);
         }
-        else if (Activity is Play.Pat or Play.Dance or Play.Wake or Play.Rub or Play.HighFive || chewing)
+        else if (Activity is Play.Pat or Play.Dance or Play.Wake or Play.Rub or Play.HighFive or Play.Stretch || chewing)
         {
             Shape(dc, "M58,67 Q63,58 69,67 M85,67 Q91,58 96,67", null, Mint, 2.8);
         }
@@ -291,6 +295,25 @@ sealed class PetArt : FrameworkElement
                 break;
             case Play.Wake:
                 Heart(dc, 77, 30 - progress * 20, 0.55, reach);
+                break;
+            case Play.Drink:
+                double cupY = 83 - reach * 16;
+                DrawPaw(dc, 96, cupY + 4, -20);
+                dc.PushTransform(new TranslateTransform(112 - reach * 15, cupY));
+                dc.PushTransform(new RotateTransform(-reach * 15));
+                Shape(dc, "M-10,-10 L-7,9 Q0,13 8,9 L10,-10 Z", "#B9EFFF", Ink, 1.7);
+                Shape(dc, "M-7,1 Q-1,-3 7,0 L6,8 Q0,11 -6,8 Z", "#68C9F0");
+                Oval(dc, 0, -10, 10, 2.8, "#E4FAFF", Ink, 1.5);
+                dc.Pop();
+                dc.Pop();
+                break;
+            case Play.Stretch:
+                DrawPaw(dc, 45 - reach * 22, 83 - reach * 38, -20 - reach * 35);
+                DrawPaw(dc, 99 + reach * 19, 83 - reach * 39, 25 + reach * 34);
+                dc.PushOpacity(reach);
+                Shape(dc, "M18,28 L20,18 M12,34 L5,30 M121,28 L127,19 M126,34 L134,31",
+                    null, "#FFD398", 2);
+                dc.Pop();
                 break;
         }
     }

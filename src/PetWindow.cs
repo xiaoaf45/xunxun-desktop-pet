@@ -24,7 +24,7 @@ sealed class PetWindow : Window
     private readonly ScaleTransform petScale = new(1, 1, 70, 73);
     private const double AnchorX = 288;
     private const double AnchorY = 219;
-    private const int NoticeDurationSeconds = 10;
+    internal const int NoticeDurationSeconds = 10;
     private readonly Border card;
     private readonly bool preview;
     private Window? noticeWindow;
@@ -42,6 +42,8 @@ sealed class PetWindow : Window
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private readonly Forms.NotifyIcon? tray;
     private readonly System.Drawing.Icon? trayImage;
+    private readonly TaskInbox? inbox;
+    private readonly WellnessReminders? wellness;
     private static readonly Uri IconResource = new("pack://application:,,,/Assets/xunxun.ico");
     private Notice? current;
     private double? noticeClosesAt;
@@ -174,6 +176,8 @@ sealed class PetWindow : Window
 
         var menu = new ContextMenu();
         AddMenu(menu, "启动 Claude / Codex", OpenLauncher);
+        AddMenu(menu, "任务收件箱", OpenInbox);
+        AddMenu(menu, "喝水和起身提醒", () => wellness?.ShowSettings());
         AddMenu(menu, "播放提醒演示", StartDemo);
         AddMenu(menu, "设置任务提醒", () => HookRegistration.Offer(this, manual: true));
         var mute = new MenuItem { Header = "免打扰", IsCheckable = true };
@@ -277,9 +281,13 @@ sealed class PetWindow : Window
             firstDemo.Stop();
             if (tray is not null) { tray.Visible = false; tray.Dispose(); }
             trayImage?.Dispose();
+            wellness?.Dispose();
         };
         if (!preview)
         {
+            inbox = new TaskInbox();
+            wellness = new WellnessReminders(this, () => !quiet && card.Visibility != Visibility.Visible
+                && !launcherOpen && !inbox.IsOpen);
             using var stream = Application.GetResourceStream(IconResource).Stream;
             using var image = new System.Drawing.Icon(stream, Forms.SystemInformation.SmallIconSize);
             trayImage = (System.Drawing.Icon)image.Clone();
@@ -292,6 +300,8 @@ sealed class PetWindow : Window
     {
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("启动 Claude / Codex", null, (_, _) => OpenLauncher());
+        menu.Items.Add("任务收件箱", null, (_, _) => OpenInbox());
+        menu.Items.Add("喝水和起身提醒", null, (_, _) => wellness?.ShowSettings());
         menu.Items.Add("播放提醒演示", null, (_, _) => StartDemo());
         menu.Items.Add("设置任务提醒", null, (_, _) => HookRegistration.Offer(this, manual: true));
         var mute = new Forms.ToolStripMenuItem("免打扰") { CheckOnClick = true };
@@ -312,12 +322,20 @@ sealed class PetWindow : Window
     {
         if (launcherOpen) return;
         launcherOpen = true;
+        wellness?.SuspendPopup();
         try { HookSetupWindow.Launch(this); }
         finally { launcherOpen = false; }
     }
 
+    private void OpenInbox()
+    {
+        wellness?.SuspendPopup();
+        inbox?.Show(this);
+    }
+
     public void Receive(Notice item)
     {
+        inbox?.Observe(item, DateTimeOffset.UtcNow);
         var key = (item.Provider, item.Session, item.Demo);
         if (item.Mood is Mood.Approval or Mood.Question or Mood.Done)
             sessions[key] = (item, DateTime.UtcNow);
@@ -343,6 +361,7 @@ sealed class PetWindow : Window
             noticeWindow?.Hide();
             return;
         }
+        wellness?.SuspendPopup();
         bool newlyShown = noticeClosesAt is null || current != previous;
         if (newlyShown)
         {
@@ -367,7 +386,7 @@ sealed class PetWindow : Window
             _ => "测试工作区 · 可以回去查看结果"
         } : string.IsNullOrEmpty(item.Project) ? "从已接入会话收到的提醒" : item.Project;
         bool t3 = item.Provider == T3Completion.Provider;
-        bool linked = item.Demo || item.Window != 0 || t3 && T3Completion.ThreadLink(item.Link) is not null;
+        bool linked = item.Demo || TaskTarget.Available(item);
         open.IsEnabled = linked;
         open.Content = item.Demo ? "回到任务  ↗"
             : t3 && linked ? "回到 T3 Code  ↗" : linked ? "切到任务窗口  ↗" : "未绑定窗口";
@@ -378,24 +397,31 @@ sealed class PetWindow : Window
 
     private void ShowNoticeWindow()
     {
-        noticeWindow ??= new Window
+        noticeWindow ??= CreateFloatingCard("巡巡 · 任务提醒", card);
+        PlaceFloatingCard(noticeWindow, card);
+        if (!noticeWindow.IsVisible) noticeWindow.Show();
+    }
+
+    internal Window CreateFloatingCard(string title, FrameworkElement content) => new()
         {
-            Owner = this, Title = "巡巡 · 任务提醒", WindowStyle = WindowStyle.None,
+            Owner = this, Title = title, WindowStyle = WindowStyle.None,
             ResizeMode = ResizeMode.NoResize, AllowsTransparency = true, Background = Brushes.Transparent,
             SizeToContent = SizeToContent.WidthAndHeight, ShowInTaskbar = false, ShowActivated = false,
-            Topmost = Topmost, FontFamily = FontFamily, UseLayoutRounding = true, Content = card
+            Topmost = Topmost, FontFamily = FontFamily, UseLayoutRounding = true, Content = content
         };
-        card.Measure(new Size(card.Width, double.PositiveInfinity));
-        noticeWindow.Left = Math.Clamp(Left + 8, workArea.Left,
-            Math.Max(workArea.Left, workArea.Right - card.Width));
-        double maxTop = Math.Max(workArea.Top, workArea.Bottom - card.DesiredSize.Height);
-        noticeWindow.Top = Math.Clamp(Top + 4, workArea.Top, maxTop);
-        if (!noticeWindow.IsVisible) noticeWindow.Show();
+
+    internal void PlaceFloatingCard(Window window, FrameworkElement content)
+    {
+        content.Measure(new Size(content.Width, double.PositiveInfinity));
+        window.Left = Math.Clamp(Left + 8, workArea.Left, Math.Max(workArea.Left, workArea.Right - content.Width));
+        double maxTop = Math.Max(workArea.Top, workArea.Bottom - content.DesiredSize.Height);
+        window.Top = Math.Clamp(Top + 4, workArea.Top, maxTop);
     }
 
     private void SetQuiet(bool value)
     {
         quiet = value;
+        if (quiet) wellness?.SuspendPopup();
         Refresh();
         if (tray is not null) tray.Text = quiet ? "巡巡 · 免打扰" : "巡巡 · AI 桌宠";
     }
@@ -608,6 +634,11 @@ sealed class PetWindow : Window
         pet.InvalidateVisual();
     }
 
+    internal void PlayWellness(Play activity)
+    {
+        if (!dragging) StartPlay(activity);
+    }
+
     public void StartDemo()
     {
         foreach (var key in sessions.Keys.Where(key => key.Item3).ToArray()) sessions.Remove(key);
@@ -646,16 +677,10 @@ sealed class PetWindow : Window
     private void Jump()
     {
         if (current is not { } item) return;
-        if (item.Provider == T3Completion.Provider)
-        {
-            if (T3Completion.OpenThread(item.Link)) Dismiss();
-            else detail.Text = "无法打开 T3 Code 会话链接";
-            return;
-        }
         if (!item.Demo)
         {
-            if (WindowsNative.BringForward(item)) Dismiss();
-            else detail.Text = "窗口已关闭或 Windows 未能切换，请手动打开任务";
+            if (TaskTarget.TryOpen(item, out var reason)) Dismiss();
+            else detail.Text = reason;
             return;
         }
 

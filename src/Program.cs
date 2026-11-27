@@ -64,6 +64,8 @@ static class Program
                 CheckDisplayCrossing();
                 bool nativeCrossing = await CheckNativeCrossing(window);
                 CheckT3Completion();
+                CheckWellness(directory);
+                CheckTaskInbox(directory);
                 CheckHighFivePointer();
                 var iconBounds = await Task.Run(DesktopIcons.Read).WaitAsync(TimeSpan.FromSeconds(6));
                 Require(!ReferenceEquals(PetCursors.Open, System.Windows.Input.Cursors.Hand)
@@ -113,7 +115,7 @@ static class Program
                 window.OpenButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
                 Require(window.Current == stale, "A failed jump discarded the reminder");
                 File.WriteAllText(Path.Combine(directory, "self-test.txt"),
-                    "PASS: relay mappings, CLI hook registration, T3 completion filtering and desktop links, notice and play visuals, autonomous play cycle, cursor assets, high-five pointer, roaming, icon detour and sizing, cross-display pursuit and roaming, reminder during play, stale target guard. "
+                    "PASS: relay mappings, CLI hook registration, T3 completion filtering and desktop links, task inbox, wellness schedules, notice and play visuals, autonomous play cycle, cursor assets, high-five pointer, roaming, icon detour and sizing, cross-display pursuit and roaming, reminder during play, stale target guard. "
                     + (nativeCrossing ? "PASS: two physical displays crossed using replayed pointer positions. " : "")
                     + $"Desktop icon bounds read: {iconBounds.Length}. "
                     + (activated ? "PASS: native foreground." : "UNVERIFIED: Windows did not grant foreground to automated run."));
@@ -360,6 +362,62 @@ static class Program
             "https://app.t3.codes/threads/test-env/", "https://app.t3.codes/threads/test-env/%2f",
             "https://example.com/threads/test-env/test-thread" })
             Require(T3Completion.ThreadLink(invalid) is null, "Invalid T3 thread link was accepted");
+    }
+
+    private static void CheckWellness(string directory)
+    {
+        var today = new DateOnly(2026, 11, 27);
+        var schedule = new WellnessSchedule(WellnessSettings.Defaults, today);
+        Require(schedule.Advance(TimeSpan.FromMinutes(44), today) is null, "Hydration appeared before 45 minutes");
+        Require(schedule.Advance(WellnessReminders.ActiveElapsed(TimeSpan.FromHours(1), true, false), today) is null
+            && WellnessReminders.ActiveElapsed(TimeSpan.FromSeconds(1), false, true) == TimeSpan.Zero
+            && WellnessReminders.ActiveElapsed(TimeSpan.FromMinutes(5), true, true) == TimeSpan.Zero,
+            "Inactivity, resumption, or suspension advanced the reminder clock");
+        Require(schedule.Advance(TimeSpan.FromMinutes(1), today) == Habit.Water, "45-minute water reminder missing");
+        schedule.Resolve(Habit.Water, HabitAction.Snooze, today);
+        Require(schedule.Advance(TimeSpan.FromMinutes(9), today) is null
+            && schedule.Advance(TimeSpan.FromMinutes(1), today) == Habit.Water, "Ten-minute snooze did not expire correctly");
+        schedule.Resolve(Habit.Water, HabitAction.SkipToday, today);
+        Require(schedule.Advance(TimeSpan.FromMinutes(5), today) == Habit.Move, "Water skip affected the independent move reminder");
+        schedule.Resolve(Habit.Move, HabitAction.Complete, today);
+        string file = Path.Combine(directory, "wellness-fixture.json");
+        LocalState.Write(file, schedule.Snapshot());
+        schedule = new WellnessSchedule(LocalState.Read<WellnessSettings>(file)!, today);
+        Require(schedule.Advance(TimeSpan.FromMinutes(50), today) is null, "Skip or completed interval did not survive restart");
+        Require(schedule.Advance(TimeSpan.FromMinutes(10), today) == Habit.Move, "Completed move interval did not restart");
+        schedule.Configure(Habit.Move, false, 60);
+        var nextDay = today.AddDays(1);
+        Require(schedule.Advance(TimeSpan.FromMinutes(44), nextDay) is null
+            && schedule.Advance(TimeSpan.FromMinutes(1), nextDay) == Habit.Water, "Daily skip did not reset on the next day");
+        schedule.Resolve(Habit.Water, HabitAction.Complete, nextDay);
+        schedule.Configure(Habit.Water, true, 2);
+        Require(schedule.Advance(TimeSpan.FromMinutes(2), nextDay) == Habit.Water, "Updated reminder interval was ignored");
+    }
+
+    private static void CheckTaskInbox(string directory)
+    {
+        string file = Path.Combine(directory, $"inbox-fixture-{Guid.NewGuid():N}.json");
+        var inbox = new TaskInbox(file);
+        var now = DateTimeOffset.UtcNow;
+        var approval = new Notice("Claude Code", "approval", Mood.Approval, false, "项目", 0, 0, 0, Tool: "Bash");
+        var question = approval with { Session = "question", Mood = Mood.Question, Tool = "AskUserQuestion" };
+        var done = approval with { Provider = T3Completion.Provider, Session = "done", Mood = Mood.Done,
+            Link = "https://app.t3.codes/threads/test-env/done" };
+        inbox.Observe(done, now);
+        inbox.Observe(approval, now.AddSeconds(1));
+        inbox.Observe(question, now.AddSeconds(2));
+        inbox.Observe(Notice.Sample("Codex CLI", Mood.Done), now.AddSeconds(3));
+        inbox = new TaskInbox(file);
+        Require(inbox.Entries.Select(row => row.Item).SequenceEqual([approval, question, done]),
+            "Inbox lost records, included a demo, or put completed work ahead of pending prompts");
+        inbox.Observe(approval with { Mood = Mood.PromptResolved, Tool = "Read" }, now.AddSeconds(4));
+        Require(inbox.Entries.Length == 3, "An unrelated tool removed a pending inbox record");
+        inbox.Observe(approval with { Mood = Mood.PromptResolved }, now.AddSeconds(5));
+        inbox.Observe(question with { Mood = Mood.Done }, now.AddSeconds(6));
+        inbox.Observe(done with { Mood = Mood.Ended }, now.AddSeconds(7));
+        inbox = new TaskInbox(file);
+        Require(inbox.Entries.Length == 2 && inbox.Entries.All(row => row.Item.Mood == Mood.Done)
+            && inbox.Entries.Any(row => row.Item == done), "Inbox did not resolve pending entries or retain completed work");
     }
 
     private static async Task<bool> CheckNativeCrossing(PetWindow window)

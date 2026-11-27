@@ -21,6 +21,24 @@ sealed record Notice(string Provider, string Session, Mood Mood, bool Demo,
             provider == "Claude Code" ? "组件文档" : "测试工作区", 0, 0, 0);
 }
 
+static class TaskTarget
+{
+    public static bool Available(Notice item) => item.Provider == T3Completion.Provider
+        ? T3Completion.ThreadLink(item.Link) is not null
+        : item.Window != 0;
+
+    public static bool TryOpen(Notice item, out string failure)
+    {
+        if (item.Provider == T3Completion.Provider)
+        {
+            failure = "无法打开 T3 Code 会话链接";
+            return T3Completion.OpenThread(item.Link);
+        }
+        failure = "窗口已关闭或 Windows 未能切换";
+        return WindowsNative.BringForward(item);
+    }
+}
+
 static class Relay
 {
     public static string Name { get; } =

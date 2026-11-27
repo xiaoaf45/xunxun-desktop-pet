@@ -168,15 +168,15 @@ static class HookSetupWindow
         dialog.ShowDialog();
     }
 
-    private static Window Create(Window owner, string title, string heading, string? description,
-        StackPanel body, Button primary, Button? secondary = null)
+    internal static Window Create(Window owner, string title, string heading, string? description,
+        StackPanel body, Button primary, Button? secondary = null, double width = 452)
     {
         var dialog = new Window
         {
             Owner = owner,
             Title = title,
             Icon = owner.Icon,
-            Width = 452,
+            Width = width,
             SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterScreen,
             WindowStyle = WindowStyle.None,
