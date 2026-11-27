@@ -5,7 +5,7 @@ using System.Windows.Media;
 
 namespace XunXun;
 
-enum Play { None, Pat, Feed, Fetch, Dance, Nap, Wake, Rub, HighFive, Drink, Stretch }
+enum Play { None, Pat, Feed, Fetch, Dance, Nap, Wake, Rub, HighFive, Drink, Stretch, Newspaper, Umbrella }
 enum PointerPose { None, Sniff, Paw }
 enum RoamTrick { None, Hop, Dribble, Kick }
 
@@ -52,6 +52,8 @@ static class PlayTiming
         Play.HighFive => 1.15,
         Play.Drink => 2.25,
         Play.Stretch => 2.3,
+        Play.Newspaper => 2.25,
+        Play.Umbrella => 2.7,
         _ => 0
     };
 }
@@ -116,6 +118,8 @@ sealed class PetArt : FrameworkElement
             Play.HighFive => (0.0, -reach * 8, reach * -8, 1.0),
             Play.Drink => (0.0, -reach * 3, reach * 5, 1.0),
             Play.Stretch => (0.0, -reach * 9, -reach * 5, 1 + reach * 0.17),
+            Play.Newspaper => (0.0, -reach * 4, reach * 5, 1),
+            Play.Umbrella => (0.0, -reach * 2, 0.0, 1),
             Play.None when PointerPose == PointerPose.Sniff =>
                 (eyeX * 0.6, Math.Sin(Time * 12) * 1.6, eyeX * 1.9, 1.0),
             _ => (0.0, 0.0, 0.0, 1.0)
@@ -313,6 +317,22 @@ sealed class PetArt : FrameworkElement
                 dc.PushOpacity(reach);
                 Shape(dc, "M18,28 L20,18 M12,34 L5,30 M121,28 L127,19 M126,34 L134,31",
                     null, "#FFD398", 2);
+                dc.Pop();
+                break;
+            case Play.Newspaper:
+                dc.PushTransform(new TranslateTransform(106 - reach * 11, 83 - reach * 8));
+                dc.PushTransform(new RotateTransform(15 - reach * 28));
+                Shape(dc, "M-15,-11 L10,-11 Q15,-11 15,-6 L15,11 L-10,11 Q-15,11 -15,6 Z", "#FFF1D9", Ink, 1.8);
+                Shape(dc, "M-10,-6 L9,-6 M-10,-1 L-3,-1 M2,-1 L9,-1 M-10,4 L-3,4 M2,4 L9,4", null, "#786D91", 1.5);
+                dc.Pop();
+                dc.Pop();
+                break;
+            case Play.Umbrella:
+                dc.PushOpacity(Math.Clamp(reach * 2.6, 0, 1));
+                Shape(dc, "M76,27 L76,76 Q76,86 85,86 Q92,86 92,78", null, Ink, 2.2);
+                Shape(dc, "M28,29 C35,12 51,4 76,4 C101,4 117,12 124,29 Q111,22 100,29 Q88,22 76,29 Q64,22 52,29 Q40,22 28,29 Z",
+                    "#A6E9EE", Ink, 2.1);
+                Shape(dc, "M52,28 Q57,12 76,4 Q95,12 100,28", null, "#4A8099", 1.5);
                 dc.Pop();
                 break;
         }

@@ -105,6 +105,8 @@ sealed class WellnessReminders : IDisposable
     private TextBlock? caption;
     private TextBlock? countdown;
 
+    public bool IsShowing => shown is not null || settingsOpen;
+
     public WellnessReminders(PetWindow owner, Func<bool> canShow)
     {
         this.owner = owner;

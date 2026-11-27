@@ -66,6 +66,7 @@ static class Program
                 CheckT3Completion();
                 CheckWellness(directory);
                 CheckTaskInbox(directory);
+                await BriefingSelfTest.Check(directory);
                 CheckHighFivePointer();
                 var iconBounds = await Task.Run(DesktopIcons.Read).WaitAsync(TimeSpan.FromSeconds(6));
                 Require(!ReferenceEquals(PetCursors.Open, System.Windows.Input.Cursors.Hand)
@@ -115,7 +116,7 @@ static class Program
                 window.OpenButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
                 Require(window.Current == stale, "A failed jump discarded the reminder");
                 File.WriteAllText(Path.Combine(directory, "self-test.txt"),
-                    "PASS: relay mappings, CLI hook registration, T3 completion filtering and desktop links, task inbox, wellness schedules, notice and play visuals, autonomous play cycle, cursor assets, high-five pointer, roaming, icon detour and sizing, cross-display pursuit and roaming, reminder during play, stale target guard. "
+                    "PASS: relay mappings, CLI hook registration, T3 completion filtering and desktop links, task inbox, wellness schedules, briefing sources and scheduling B01–B10, notice and play visuals, autonomous play cycle, cursor assets, high-five pointer, roaming, icon detour and sizing, cross-display pursuit and roaming, reminder during play, stale target guard. "
                     + (nativeCrossing ? "PASS: two physical displays crossed using replayed pointer positions. " : "")
                     + $"Desktop icon bounds read: {iconBounds.Length}. "
                     + (activated ? "PASS: native foreground." : "UNVERIFIED: Windows did not grant foreground to automated run."));

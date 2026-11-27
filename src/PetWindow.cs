@@ -44,6 +44,7 @@ sealed class PetWindow : Window
     private readonly System.Drawing.Icon? trayImage;
     private readonly TaskInbox? inbox;
     private readonly WellnessReminders? wellness;
+    private readonly DailyBriefing? briefing;
     private static readonly Uri IconResource = new("pack://application:,,,/Assets/xunxun.ico");
     private Notice? current;
     private double? noticeClosesAt;
@@ -79,7 +80,7 @@ sealed class PetWindow : Window
     public Notice? Current => current;
     internal Play CurrentPlay => pet.Activity;
 
-    public PetWindow(bool preview = false)
+    public PetWindow(bool preview = false, BriefingClient? briefingClient = null)
     {
         this.preview = preview;
         Width = 364;
@@ -177,6 +178,7 @@ sealed class PetWindow : Window
         var menu = new ContextMenu();
         AddMenu(menu, "启动 Claude / Codex", OpenLauncher);
         AddMenu(menu, "任务收件箱", OpenInbox);
+        AddMenu(menu, "每日简报", () => briefing?.Show());
         AddMenu(menu, "喝水和起身提醒", () => wellness?.ShowSettings());
         AddMenu(menu, "播放提醒演示", StartDemo);
         AddMenu(menu, "设置任务提醒", () => HookRegistration.Offer(this, manual: true));
@@ -282,12 +284,15 @@ sealed class PetWindow : Window
             if (tray is not null) { tray.Visible = false; tray.Dispose(); }
             trayImage?.Dispose();
             wellness?.Dispose();
+            briefing?.Dispose();
         };
         if (!preview)
         {
             inbox = new TaskInbox();
             wellness = new WellnessReminders(this, () => !quiet && card.Visibility != Visibility.Visible
                 && !launcherOpen && !inbox.IsOpen);
+            briefing = new DailyBriefing(this, inbox, () => !quiet && card.Visibility != Visibility.Visible
+                && !launcherOpen && !inbox.IsOpen && !wellness.IsShowing, OpenInbox, briefingClient);
             using var stream = Application.GetResourceStream(IconResource).Stream;
             using var image = new System.Drawing.Icon(stream, Forms.SystemInformation.SmallIconSize);
             trayImage = (System.Drawing.Icon)image.Clone();
@@ -301,6 +306,7 @@ sealed class PetWindow : Window
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("启动 Claude / Codex", null, (_, _) => OpenLauncher());
         menu.Items.Add("任务收件箱", null, (_, _) => OpenInbox());
+        menu.Items.Add("每日简报", null, (_, _) => briefing?.Show());
         menu.Items.Add("喝水和起身提醒", null, (_, _) => wellness?.ShowSettings());
         menu.Items.Add("播放提醒演示", null, (_, _) => StartDemo());
         menu.Items.Add("设置任务提醒", null, (_, _) => HookRegistration.Offer(this, manual: true));
@@ -323,6 +329,7 @@ sealed class PetWindow : Window
         if (launcherOpen) return;
         launcherOpen = true;
         wellness?.SuspendPopup();
+        briefing?.SuspendPopup();
         try { HookSetupWindow.Launch(this); }
         finally { launcherOpen = false; }
     }
@@ -330,6 +337,7 @@ sealed class PetWindow : Window
     private void OpenInbox()
     {
         wellness?.SuspendPopup();
+        briefing?.SuspendPopup();
         inbox?.Show(this);
     }
 
@@ -362,6 +370,7 @@ sealed class PetWindow : Window
             return;
         }
         wellness?.SuspendPopup();
+        briefing?.SuspendPopup();
         bool newlyShown = noticeClosesAt is null || current != previous;
         if (newlyShown)
         {
@@ -421,7 +430,11 @@ sealed class PetWindow : Window
     private void SetQuiet(bool value)
     {
         quiet = value;
-        if (quiet) wellness?.SuspendPopup();
+        if (quiet)
+        {
+            wellness?.SuspendPopup();
+            briefing?.SuspendPopup();
+        }
         Refresh();
         if (tray is not null) tray.Text = quiet ? "巡巡 · 免打扰" : "巡巡 · AI 桌宠";
     }
@@ -635,6 +648,12 @@ sealed class PetWindow : Window
     }
 
     internal void PlayWellness(Play activity)
+    {
+        briefing?.SuspendPopup();
+        PlayReminder(activity);
+    }
+
+    internal void PlayReminder(Play activity)
     {
         if (!dragging) StartPlay(activity);
     }
