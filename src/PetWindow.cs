@@ -48,6 +48,7 @@ sealed class PetWindow : Window
     private int countdownSeconds;
     private int selection;
     private bool quiet;
+    private bool launcherOpen;
     private double playingSince;
     private double offerPlayUntil = 4.2;
     private double lastFrame;
@@ -172,6 +173,7 @@ sealed class PetWindow : Window
         Content = canvas;
 
         var menu = new ContextMenu();
+        AddMenu(menu, "启动 Claude / Codex", OpenLauncher);
         AddMenu(menu, "播放提醒演示", StartDemo);
         AddMenu(menu, "设置任务提醒", () => HookRegistration.Offer(this, manual: true));
         var mute = new MenuItem { Header = "免打扰", IsCheckable = true };
@@ -194,6 +196,12 @@ sealed class PetWindow : Window
         pet.MouseLeftButtonDown += (_, eventArgs) =>
         {
             ReleaseHighFivePointer();
+            if (eventArgs.ClickCount == 2)
+            {
+                eventArgs.Handled = true;
+                OpenLauncher();
+                return;
+            }
             press = eventArgs.GetPosition(this);
             dragOffset = PointToScreen(press) - PointToScreen(new Point());
             pressAction = pet.Activity == Play.Nap ? Play.Wake
@@ -283,6 +291,7 @@ sealed class PetWindow : Window
     private Forms.NotifyIcon TrayIcon(System.Drawing.Icon image)
     {
         var menu = new Forms.ContextMenuStrip();
+        menu.Items.Add("启动 Claude / Codex", null, (_, _) => OpenLauncher());
         menu.Items.Add("播放提醒演示", null, (_, _) => StartDemo());
         menu.Items.Add("设置任务提醒", null, (_, _) => HookRegistration.Offer(this, manual: true));
         var mute = new Forms.ToolStripMenuItem("免打扰") { CheckOnClick = true };
@@ -297,6 +306,14 @@ sealed class PetWindow : Window
             ContextMenuStrip = menu,
             Visible = true
         };
+    }
+
+    private void OpenLauncher()
+    {
+        if (launcherOpen) return;
+        launcherOpen = true;
+        try { HookSetupWindow.Launch(this); }
+        finally { launcherOpen = false; }
     }
 
     public void Receive(Notice item)

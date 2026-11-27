@@ -360,7 +360,7 @@ static class HookRegistration
             ? Path.Combine(profile, defaultDirectory) : home, file));
     }
 
-    private static IEnumerable<string> InstallDirectories(string profile)
+    internal static IEnumerable<string> InstallDirectories(string profile)
     {
         foreach (var folder in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
             if (!string.IsNullOrWhiteSpace(folder)) yield return folder.Trim().Trim('"');
@@ -372,13 +372,23 @@ static class HookRegistration
     }
 
     internal static bool Installed(string tool, IEnumerable<string> directories) =>
-        directories.Any(folder => new[] { ".exe", ".cmd", ".bat", ".ps1" }
-            .Any(extension => File.Exists(Path.Combine(folder, tool + extension))));
+        FindExecutable(tool, directories) is not null;
+
+    internal static string? FindExecutable(string tool, IEnumerable<string> directories)
+    {
+        foreach (var folder in directories.Where(Path.IsPathFullyQualified))
+            foreach (var extension in new[] { ".exe", ".cmd", ".bat", ".ps1" })
+            {
+                var path = Path.Combine(folder, tool + extension);
+                if (File.Exists(path)) return path;
+            }
+        return null;
+    }
 
     private static bool ConfigError(Exception error) =>
         error is IOException or UnauthorizedAccessException or JsonException or ArgumentException;
 
-    private static string AppDataDirectory => Path.Combine(
+    internal static string AppDataDirectory => Path.Combine(
         Environment.GetEnvironmentVariable("LOCALAPPDATA")
         ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "XunXun");

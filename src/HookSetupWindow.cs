@@ -1,16 +1,118 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
+using Microsoft.Win32;
 
 namespace XunXun;
 
 static class HookSetupWindow
 {
+    public static void Launch(Window owner)
+    {
+        var tools = HarnessLauncher.AvailableTools();
+        if (tools.Length == 0)
+        {
+            Report(owner, "启动助手", ["未找到已安装的 Claude Code 或 Codex CLI。"]);
+            return;
+        }
+
+        var body = new StackPanel();
+        var launch = PetWindow.Action("启动终端", true);
+        launch.IsDefault = true;
+        var cancel = PetWindow.Action("取消", false);
+        cancel.IsCancel = true;
+        var dialog = Create(owner, "巡巡 · 启动助手", "启动助手", null, body, launch, cancel);
+        AutomationProperties.SetAutomationId(launch, "launch-terminal");
+
+        var toolLabel = PetWindow.Label("工具", 12, "#D1D0E3", true);
+        var provider = new ComboBox { ItemsSource = tools, DisplayMemberPath = nameof(HarnessLauncher.Tool.Name),
+            SelectedIndex = 0, Padding = new Thickness(7, 5, 7, 5), Margin = new Thickness(0, 5, 0, 13) };
+        AutomationProperties.SetLabeledBy(provider, toolLabel);
+        AutomationProperties.SetAutomationId(provider, "launch-tool");
+        body.Children.Add(toolLabel);
+        body.Children.Add(provider);
+
+        var history = new ProjectHistory();
+        var paths = history.Read();
+        var pathLabel = PetWindow.Label("项目路径", 12, "#D1D0E3", true);
+        var path = new ComboBox
+        {
+            IsEditable = true, IsTextSearchEnabled = false, ItemsSource = paths, Text = paths.FirstOrDefault() ?? "",
+            Padding = new Thickness(7, 5, 7, 5), MaxDropDownHeight = 230, MinWidth = 250
+        };
+        var browse = PetWindow.Action("浏览…", false);
+        browse.Margin = new Thickness(8, 0, 0, 0);
+        AutomationProperties.SetLabeledBy(path, pathLabel);
+        AutomationProperties.SetAutomationId(path, "launch-project");
+        var pathRow = new DockPanel { Margin = new Thickness(0, 5, 0, 13) };
+        DockPanel.SetDock(browse, Dock.Right);
+        pathRow.Children.Add(browse);
+        pathRow.Children.Add(path);
+        body.Children.Add(pathLabel);
+        body.Children.Add(pathRow);
+
+        var permission = new CheckBox
+        {
+            IsChecked = false, Content = "无需审批（仅本次）", Foreground = PetWindow.ColorBrush("#F1F0FF"),
+            ToolTip = "关闭时沿用该工具的现有审批设置。"
+        };
+        AutomationProperties.SetAutomationId(permission, "launch-no-approval");
+        body.Children.Add(permission);
+        var mode = Wrapped("", 11, "#D1D0E3", new Thickness(20, 5, 0, 0));
+        var error = Wrapped("", 12, "#FFC185", new Thickness(0, 9, 0, 0));
+        mode.Visibility = error.Visibility = Visibility.Collapsed;
+        body.Children.Add(mode);
+        body.Children.Add(error);
+
+        void UpdateMode()
+        {
+            mode.Text = provider.SelectedItem is HarnessLauncher.Tool { Name: "Codex CLI" }
+                ? "跳过 Codex 命令审批，沿用当前沙箱权限。"
+                : "Claude Code 将跳过工具权限审批。";
+            mode.Visibility = permission.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        }
+        permission.Checked += (_, _) => UpdateMode();
+        permission.Unchecked += (_, _) => UpdateMode();
+        provider.SelectionChanged += (_, _) => UpdateMode();
+
+        browse.Click += (_, _) =>
+        {
+            var picker = new OpenFolderDialog { Title = "选择项目目录" };
+            if (HarnessLauncher.ExistingDirectory(path.Text) is { } current) picker.InitialDirectory = current;
+            if (picker.ShowDialog(dialog) == true) path.Text = picker.FolderName;
+        };
+        launch.Click += (_, _) =>
+        {
+            if (HarnessLauncher.ExistingDirectory(path.Text) is not { } directory)
+            {
+                error.Text = "请选择一个存在的项目目录。";
+                error.Visibility = Visibility.Visible;
+                path.Focus();
+                return;
+            }
+            if (provider.SelectedItem is not HarnessLauncher.Tool tool) return;
+            try
+            {
+                HarnessLauncher.Start(tool, directory, permission.IsChecked == true);
+                history.Remember(directory);
+                dialog.DialogResult = true;
+            }
+            catch (Win32Exception failure)
+            {
+                error.Text = "无法启动终端。\n" + failure.Message;
+                error.Visibility = Visibility.Visible;
+            }
+        };
+        cancel.Click += (_, _) => dialog.DialogResult = false;
+        dialog.ShowDialog();
+    }
+
     public static HookRegistration.Target[] Ask(Window owner, List<HookRegistration.Target> targets, string profile)
     {
         var body = new StackPanel();

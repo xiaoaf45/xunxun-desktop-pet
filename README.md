@@ -47,6 +47,14 @@ Start-Process .\release\XunXun.exe -ArgumentList '--demo'
 
 Claude Code 和 Codex 的完成提醒来自 `Stop` Hook。它表示当前一轮回复结束，任务结果可回到原会话查看。工具审批仍由你在原工具里处理。
 
+### 从巡巡启动 Claude Code 或 Codex CLI
+
+双击巡巡，或从巡巡和托盘的右键菜单选择 **启动 Claude / Codex**。选一个已安装的工具，再输入、浏览或从下拉列表选取项目路径。启动过的最近 12 个路径会记在本机，再次打开面板时默认填入上一次的路径。
+
+每次启动会新开一个独立的 Windows 控制台，从所选目录运行 CLI。连接好对应 Hook 后，点击任务气泡中的 **切到任务窗口**，巡巡会打开该会话所在的控制台。CLI 退出后，控制台会保留供你查看结果。
+
+**无需审批**默认关闭，关闭时沿用工具设置。勾选后仅本次会话生效。Claude Code 使用 `--permission-mode bypassPermissions`，Codex CLI 使用 `--ask-for-approval never` 并沿用现有沙箱权限。项目历史只记录路径。
+
 ### Claude Code 和 Codex CLI
 
 1. 在 Windows 上安装对应的 CLI，并启动巡巡。巡巡会检测已安装的 CLI，列出缺少或需要迁移的提醒 Hook。
@@ -74,7 +82,7 @@ Claude Code 和 Codex 的完成提醒来自 `Stop` Hook。它表示当前一轮�
 - **Claude Code**。从目标终端运行 `.\adapters\Start-Harness.ps1 -Provider claude`，以 `--settings` 加载样例。手动样例需要支持 `shell: powershell` 的 Claude Code 版本。
 - **Codex CLI**。将生成的 `codex-hooks.json` 中的条目合并进受信任项目的 `.codex/hooks.json`，再从目标终端运行 `.\adapters\Start-Harness.ps1 -Provider codex`，在 `/hooks` 中审查并信任。
 
-启动脚本会记录当前窗口，气泡中才会出现可用的 **切到任务窗口** 按钮。多个 Windows Terminal 标签页共用一个窗口时，进入窗口后可手动切到相应标签页。已使用用户级自动注册时，可直接从对应 CLI 接收提醒，生成样例适用于有手动配置需求的场景。
+手动启动脚本会记录当前窗口，使气泡显示可用的 **切到任务窗口** 按钮。多个 Windows Terminal 标签页共用一个窗口时，进入窗口后可手动切到相应标签页。已使用用户级自动注册时，可直接从对应 CLI 接收提醒，生成样例适用于有手动配置需求的场景。
 
 ### T3 Code
 
