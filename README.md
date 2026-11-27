@@ -1,15 +1,17 @@
 # 巡巡 XunXun
 
-巡巡是一个 Windows 桌宠。它会在桌面上散步、运动、跟你互动，也能把 Claude Code、Codex CLI 和 T3 Code 的任务提醒放到桌面上。
+巡巡是一只 Windows 桌宠。它会在桌面散步、玩球、和鼠标互动，也会提醒你去处理 Claude Code、Codex CLI 和 T3 Code 的任务。想知道今天要不要带伞、关注的工具有没有更新，可以打开 **每日简报**。
 
 ![巡巡的审批、提问和完成气泡](preview/xunxun-preview.png)
 
-## 先跑起来
+[快速开始](#快速开始) · [任务提醒](#任务提醒) · [桌面互动](#桌面互动) · [每日简报](#每日简报) · [排查与自测](#排查与自测)
 
-巡巡使用 .NET 9 和 WPF。当前构建产物是需要桌面运行时的 Windows x64 单文件程序。
+## 快速开始
 
-- **已有 `XunXun.exe`**。安装 [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0) 的 Windows x64 版本。若收到的是 ZIP，先把 EXE 解压到常用目录，再双击运行。
-- **从源码构建**。在 Windows 上安装 .NET 9 SDK，克隆仓库，在仓库根目录运行下面的命令。构建完成后双击 `release\XunXun.exe`。
+巡巡是 Windows x64 的 .NET 9 WPF 单文件程序。运行前请安装 [.NET 9 桌面运行时](https://dotnet.microsoft.com/download/dotnet/9.0)。
+
+- 已有 ZIP 时，先把 `XunXun.exe` 解压到常用目录，再双击运行。
+- 从源码构建时，请在 Windows 上安装 .NET 9 SDK，再执行下面的命令。编译后打开 `release\XunXun.exe`。覆盖构建前，可以通过右键菜单的 **退出巡巡** 关闭正在使用的 EXE。
 
 ```powershell
 git clone https://github.com/xiaoaf45/xunxun-desktop-pet.git
@@ -17,102 +19,37 @@ cd xunxun-desktop-pet
 dotnet publish .\src\XunXun.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=None -o .\release
 ```
 
-重新构建前可以用右键菜单的 **退出巡巡** 关闭正在运行的同一份 EXE。
-
-双击启动后，巡巡会自由漫游并监听已配置的任务提醒。想快速体验气泡，右键巡巡或系统托盘图标，选择 **播放提醒演示**。演示依次展示审批、提问和完成。点 **回到任务** 可进入模拟任务窗口，也可以直接用以下命令启动演示。
-
-```powershell
-Start-Process .\release\XunXun.exe -ArgumentList '--demo'
-```
-
-## 桌面互动
-
-- **漫游和运动**。巡巡会随机散步，轮流小跳、拍球运球和踢球，也会挑相邻屏幕当目的地。
-- **遇到桌面图标**。有空间时会轻轻绕开单个图标。图标密集或正在追鼠标时会缩小穿过，离开图标区后恢复原大小。
-- **追鼠标和摸头**。在它附近移动指针，它会凑过来，也能沿相邻屏幕的公共边缘追过去。指针移到它身上会变成一只小手。单击摸头，来回滑动挠痒。
-- **拖动和击掌**。按住拖动时它会扭身、晃耳朵、蹬腿，松手后继续漫游。悬停一会儿，等它伸爪再单击可以击掌。小手光标会随爪子抬起，手动移动鼠标可以放开。
-- **喂食、抛球、跳舞和小睡**。把鼠标移到它身上即可看到按钮。睡着后点击巡巡或点 **叫醒**，它会重新站起来。
-
-[查看动作预览](preview/xunxun-play.png)
-
-## 喝水和起身提醒
-
-右键巡巡或托盘图标，选择 **喝水和起身提醒**。默认每 45 分钟提醒喝水、每 60 分钟提醒起身，两项可以分别开关并调整间隔。
-
-锁屏或连续 5 分钟没有键鼠输入时暂停计时，回来后继续。到点时巡巡会抱起水杯或伸懒腰。点击 **完成** 开始下一轮计时，**10 分钟后** 稍后再提醒，**今天跳过** 暂停该项到第二天。气泡 10 秒后自动收起，并在 10 分钟后再提醒一次。
-
-## 每日简报
-
-右键巡巡或托盘图标，打开 **每日简报**。点 **订阅设置** 选择栏目、城市、GitHub 主题和资讯关键词。可以直接点 **刷新** 查看，也可以勾选 **每天推送简报**，默认在 08:30 推送。自动推送默认关闭。
-
-- **出门天气**。查看所选城市的当地预报日期、温度范围和 07:00–10:00 的最高降水概率。降水概率达到 50% 时，推送会让巡巡撑伞。
-- **工具正式版**。跟踪 Claude Code 和 Codex 的最新正式版。首次自动检查记录当前版本，随后发现新正式版才计入更新提醒。
-- **GitHub 主题 Top 3**。查看所选主题近 7 个 UTC 日新建、按累计星标排序的最多三个项目。
-- **前沿 AI 资讯**。从 OpenAI、Google DeepMind 和 Hugging Face 的订阅源筛选近 7 天的最新内容，每次最多显示 3 条，可点开原文。
-- **今日任务小结**。可单独开启，默认时间 18:00。它统计本机收件箱当天保留的完成记录、当前待审批和待回答，可以直接打开收件箱。
-
-简报与任务小结各自每天最多弹一次，锁屏、空闲或有任务提醒时顺延，只补发当天。气泡收起后也能从托盘查看。完整预报超时或来源出错时会尝试只查日预报，注明上午降水概率暂缺。来源失败时，简报保留匹配的缓存并显示更新时间。联网栏目读取公开接口，任务小结在本机统计。
-
-[实施与测试计划](docs/briefing-plan.md)
+右键巡巡或托盘图标，选择 **播放提醒演示**，即可体验审批、提问和完成气泡。点击 **回到任务** 会打开模拟任务窗口。也可以在启动时传入 `--demo`。
 
 ## 任务提醒
 
-任务进行中，巡巡照常漫游。需要提问、审批或任务完成时，气泡会停在弹出的位置，巡巡可以继续走。提醒逐条显示，每条从 10 秒开始倒数。成功回到任务窗口后，当前气泡立即收起，也可以提前点 × 收起。用右键菜单里的 **免打扰** 可暂时隐藏气泡。
-
-| 工具 | 结构化提问 | 待审批 | 完成 | 气泡入口 |
+| 来源 | 结构化提问 | 待审批 | 完成 | 返回入口 |
 | --- | --- | --- | --- | --- |
 | Claude Code | `AskUserQuestion` 和 MCP 结构化提问 | 工具权限请求 | 本轮回复结束 | 已绑定的终端窗口 |
 | Codex CLI | — | 工具权限请求 | 本轮回复结束 | 已绑定的终端窗口 |
-| T3 Code | — | — | 主会话和后台工作结束 | 优先打开桌面端对应会话 |
+| T3 Code | — | — | 主会话及后台工作结束 | 优先在桌面端打开对应会话 |
 
-Claude Code 和 Codex 的完成提醒来自 `Stop` Hook。它表示当前一轮回复结束，任务结果可回到原会话查看。工具审批仍由你在原工具里处理。
+巡巡会继续漫游，提醒在原位置停留 10 秒。点 × 或成功跳回工作区后，当前气泡会立即收起。气泡消失后，可以在右键菜单的 **任务收件箱** 找回最近 100 条记录。待审批和待回答排在完成记录前面，对应工具处理完后会从待处理列表移除。用 **免打扰** 可以暂时隐藏气泡。
 
-### 任务收件箱
+### 接入 Claude Code 和 Codex CLI
 
-右键巡巡或托盘图标，选择 **任务收件箱**。待审批、待回答和已完成的任务可以在气泡收起后找回。待处理记录列在完成记录前面，接收到相应的处理或结束事件后会从待处理列表移除。
+1. 安装对应的 CLI 后启动巡巡。它会检查已安装工具是否需要注册或迁移提醒 Hook。
+2. 在窗口中勾选工具并点击 **注册所选 Hook**。稍后也可以从右键菜单的 **设置任务提醒** 打开注册界面。
+3. 重开 CLI 会话。Codex 还需在 `/hooks` 中审查并信任巡巡的 Hook。
 
-收件箱保留最近 100 条记录。点 **回到工作区** 可以打开已绑定的终端窗口或 T3 Code 会话。收件箱只保存提醒所需的信息，记录存于本机，重启巡巡后仍能查看。
+注册会合并巡巡自己的条目，每个事件保留一条巡巡 Hook。其他 Hook 会保留，修改前的文件会备份在原配置目录。Claude Code 的 Hook 使用明文 PowerShell 命令。两种 Hook 都通过当前 Windows 用户和会话的命名管道发送事件类型、会话标识、项目目录末级名称和窗口绑定信息。完成提醒对应 `Stop` 事件，即本轮回复结束。 [Claude Code Hooks](https://code.claude.com/docs/en/hooks) · [Codex Hooks](https://learn.chatgpt.com/docs/hooks)
 
-### 从巡巡启动 Claude Code 或 Codex CLI
+### 从巡巡启动并绑定终端
 
-双击巡巡，或从巡巡和托盘的右键菜单选择 **启动 Claude / Codex**。选一个已安装的工具，再输入、浏览或从下拉列表选取项目路径。启动过的最近 12 个路径会记在本机，再次打开面板时默认填入上一次的路径。
+双击巡巡，或右键选择 **启动 Claude / Codex**。选择工具和项目目录后，巡巡会打开独立的 PowerShell 窗口，并优先由 Windows Terminal 显示。最近 12 个项目目录可以从下拉列表重选。
 
-每次启动会打开一个独立的 PowerShell 窗口，从所选目录运行 CLI。巡巡优先使用 Windows Terminal 显示 PowerShell，并启用 UTF-8。找不到 Windows Terminal 时使用 Windows 自带控制台。连接好对应 Hook 后，点击任务气泡中的 **切到任务窗口** 可回到该会话。CLI 退出时，巡巡启动的 PowerShell 也会退出。Windows Terminal 的关闭行为由终端配置决定。
+Hook 接入后，点击 **切到任务窗口** 或收件箱里的 **回到工作区**，即可返回对应会话。CLI 退出时，巡巡启动的 PowerShell 随之退出，Windows Terminal 按其终端配置处理窗口。
 
-**无需审批**默认关闭，关闭时沿用工具设置。勾选后仅本次会话生效。Claude Code 使用 `--permission-mode bypassPermissions`，Codex CLI 使用 `--ask-for-approval never` 并沿用现有沙箱权限。项目历史只记录路径。
+**无需审批** 默认关闭，只在当次勾选时生效。Claude Code 使用 `--permission-mode bypassPermissions`，Codex CLI 使用 `--ask-for-approval never` 并沿用工具当前的沙箱权限。
 
-### Claude Code 和 Codex CLI
+### 接入 T3 Code
 
-1. 在 Windows 上安装对应的 CLI，并启动巡巡。巡巡会检测已安装的 CLI，列出缺少或需要迁移的提醒 Hook。
-2. 在弹窗中勾选工具，再点击 **注册所选 Hook**。选择 **暂不接入** 后，可以用巡巡或托盘的右键菜单 **设置任务提醒** 再次打开。
-3. 重新打开 Claude Code 或 Codex 会话。Codex 还需在 `/hooks` 中审查并信任巡巡的 Hook。
-
-自动注册会合并巡巡的条目，保留已有的其他 Hook，并在原配置目录留一份修改前的备份。同一事件只保留一条由巡巡注册的 Hook。Claude Code 使用明文 PowerShell 命令，从当前用户的固定目录启动接收程序，因此把桌宠移动到其他目录后也能继续使用。
-
-| 内容 | 默认位置 |
-| --- | --- |
-| Claude Code 用户配置 | `%USERPROFILE%\.claude\settings.json`，可由 `CLAUDE_CONFIG_DIR` 指定目录 |
-| Codex CLI 用户 Hook | `%USERPROFILE%\.codex\hooks.json`，可由 `CODEX_HOME` 指定目录 |
-| 巡巡的固定接收程序 | `%LOCALAPPDATA%\XunXun\HookRelay\XunXun.exe` |
-
-[Claude Code Hooks](https://code.claude.com/docs/en/hooks) · [Codex Hooks](https://learn.chatgpt.com/docs/hooks)
-
-### 手动配置和终端绑定
-
-在仓库根目录运行脚本生成 Claude Code 和 Codex 的样例，输出在 `adapters/examples/`。样例引用指定 EXE 的绝对路径，移动程序后可重新生成。
-
-```powershell
-.\adapters\New-HookExamples.ps1 -Executable .\release\XunXun.exe
-```
-
-- **Claude Code**。从目标终端运行 `.\adapters\Start-Harness.ps1 -Provider claude`，以 `--settings` 加载样例。手动样例需要支持 `shell: powershell` 的 Claude Code 版本。
-- **Codex CLI**。将生成的 `codex-hooks.json` 中的条目合并进受信任项目的 `.codex/hooks.json`，再从目标终端运行 `.\adapters\Start-Harness.ps1 -Provider codex`，在 `/hooks` 中审查并信任。
-
-手动启动脚本会记录当前窗口，使气泡显示可用的 **切到任务窗口** 按钮。多个 Windows Terminal 标签页共用一个窗口时，进入窗口后可手动切到相应标签页。已使用用户级自动注册时，可直接从对应 CLI 接收提醒，生成样例适用于有手动配置需求的场景。
-
-### T3 Code
-
-确保当前 Windows 用户能运行 `t3` CLI。在 `XunXun.exe` 同目录创建 `t3-projects.json`，写入要关注的项目 ID 数组，再重启巡巡。
+确保能运行 `t3` CLI。在 `XunXun.exe` 同目录建立 `t3-projects.json`，将下面的值换成实际项目 ID，再重启巡巡。
 
 ```json
 [
@@ -120,29 +57,78 @@ Claude Code 和 Codex 的完成提醒来自 `Stop` Hook。它表示当前一轮�
 ]
 ```
 
-将示例值换成实际项目 ID。可以先用 `t3 thread list --json --project <项目 ID>` 确认 CLI 能读取对应项目。
+用 `t3 thread list --json --project <项目 ID>` 可以检查 CLI 是否能读取该项目。巡巡启动时先记录现有状态，之后只提醒新完成的主会话。**回到 T3 Code** 优先使用 `t3code://` 打开对应会话，Windows 找不到桌面协议或无法启动时会打开会话网页。
 
-巡巡会轮询配置中的项目，启动时先记录已有状态，后续在主会话及后台工作结束时提醒一次。点击 **回到 T3 Code** 会优先通过 `t3code://` 打开桌面端的对应会话。Windows 找不到桌面端协议或无法启动时，会打开会话网页。
+<details>
+<summary>手动配置 Hook 和绑定终端</summary>
 
-## 排查提醒
+从仓库根目录生成配置样例，输出在 `adapters/examples/`，并引用指定 EXE 的绝对路径。
 
-- **旧版配置指向压缩包临时目录**。退出旧巡巡，把新版 EXE 解压到常用目录再启动。确认一次迁移后，配置会改为固定接收程序的路径，并合并重复的巡巡条目。
-- **Claude Code 未收到提醒**。检查实际启动 CLI 的 Windows 用户与巡巡是否处在同一会话，确认 CLI 使用的配置目录与注册窗口显示的目录一致，重开 CLI 后再试。
-- **Codex Hook 已写入**。重开 Codex，在 `/hooks` 查看巡巡条目及其信任状态。
-- **T3 Code 未收到提醒**。核对 `t3-projects.json` 与 EXE 同目录，使用实际项目 ID，并在终端确认 `t3 thread list` 能读到该项目。
+```powershell
+.\adapters\New-HookExamples.ps1 -Executable .\release\XunXun.exe
+```
 
-Claude Code 和 Codex 的 Hook 通过当前用户和会话的 Windows 命名管道转发会话 ID、事件类型、工作目录末级名称和窗口绑定信息。T3 Code 的状态来自本机 CLI。
+- **Claude Code**。从目标终端运行 `.\adapters\Start-Harness.ps1 -Provider claude`，脚本会用 `--settings` 加载样例。样例需要支持 `shell: powershell` 的 Claude Code 版本。
+- **Codex CLI**。将样例 `codex-hooks.json` 合并进受信任项目的 `.codex/hooks.json`，再从目标终端运行 `.\adapters\Start-Harness.ps1 -Provider codex`，在 `/hooks` 中审查并信任。
 
-## 项目结构和自测
+手动脚本记录的是窗口。多个 Windows Terminal 标签页共用同一窗口时，切回后需自行选中相应标签页。
 
-| 路径 | 用途 |
+</details>
+
+## 桌面互动
+
+- 巡巡会散步、小跳、拍球和踢球，也能在相邻屏幕漫游或追鼠标。遇到密集的桌面图标时会缩小穿过去。
+- 单击摸头，来回滑动挠痒。长按拖动时它会扭身挣扎。悬停等它伸爪后单击可以击掌，光标会随爪子抬起，主动移动鼠标即可放开。
+- 把鼠标移到巡巡身上，可以喂食、抛球、让它跳舞或小睡。
+
+[动作预览](preview/xunxun-play.png)
+
+### 喝水和起身提醒
+
+从右键菜单打开 **喝水和起身提醒**。默认每 45 分钟提醒喝水、每 60 分钟提醒起身，可分别开关和调整。锁屏或连续 5 分钟没有键鼠操作时暂停计时，回来后继续。
+
+到点时巡巡会抱起水杯或伸懒腰。可点 **完成**、**10 分钟后** 或 **今天跳过**。气泡 10 秒后自动收起，默认 10 分钟后再提醒一次。
+
+## 每日简报
+
+从右键菜单打开 **每日简报**，可以手动 **刷新**。在 **订阅设置** 里选城市、栏目、GitHub 主题和资讯关键词。**每天推送简报** 默认关闭，开启后的默认时间是 08:30。
+
+| 栏目 | 内容 |
 | --- | --- |
-| [`src/`](src) | WPF 桌宠、动作绘制、窗口与气泡、Hook 注册和接收、T3 Code 完成提醒 |
-| [`src/Assets/`](src/Assets) | 应用图标和鼠标指针资源 |
-| [`adapters/`](adapters) | Hook 样例生成和终端启动脚本 |
-| [`preview/`](preview) | 自测生成的桌宠动作和模拟提醒预览 |
+| 出门天气 | 所选城市的当地预报日期、温度范围和 07:00–10:00 最高降水概率。达到 50% 时，巡巡撑伞来提醒。 |
+| 工具正式版 | Claude Code 和 Codex 的最新正式版。首次自动检查记录当前版本，后续发现新正式版才计入推送。 |
+| GitHub 主题 Top 3 | 所选主题近 7 个 UTC 日新建的仓库，按累计星标排序，最多展示三个。 |
+| 前沿 AI 资讯 | 从 OpenAI、Google DeepMind 和 Hugging Face 的公开订阅源筛选近 7 天的内容，最多展示 3 条，可点开原文。 |
+| 今日任务小结 | 可单独开启，默认 18:00。在本机统计收件箱当天保留的完成记录、当前待审批和待回答数量，可打开收件箱。 |
 
-构建后可运行内置自测，报告及预览图会写到指定目录。
+巡巡会叼份报纸来送简报。在巡巡运行期间，简报和任务小结各自每天最多弹一次。锁屏、空闲或有任务提醒时顺延，只补发当天。完整预报超时或服务出错时尝试查询日预报，并标记上午降水概率暂缺。其他来源失败时显示可用缓存及更新时间。 [数据入口与测试记录](docs/briefing-plan.md)
+
+## 排查与自测
+
+### 常见情况
+
+| 情况 | 检查方法 |
+| --- | --- |
+| Claude Code 没有提醒 | 检查桌宠与 CLI 是否在同一 Windows 用户和会话下运行，核对配置目录，重开 CLI。 |
+| Codex 没有提醒 | 在 `/hooks` 中确认巡巡条目已受信任，再重开会话。 |
+| 有提醒但显示未绑定窗口 | 通过 **启动 Claude / Codex** 或手动脚本打开新的终端会话。 |
+| T3 Code 没有提醒 | 检查 `t3-projects.json` 是否与 EXE 同目录，并用 CLI 验证项目 ID。 |
+| 简报缺少天气或其他栏目 | 在 **订阅设置** 确认城市和栏目，再点 **刷新**，可在简报里查看失败状态和缓存时间。 |
+| 旧 Hook 指向压缩包临时目录 | 把新版 EXE 解压到固定目录，再从 **设置任务提醒** 完成一次迁移。 |
+
+### 本机文件
+
+| 内容 | 默认位置 |
+| --- | --- |
+| Claude Code 用户配置 | `%USERPROFILE%\.claude\settings.json`，可由 `CLAUDE_CONFIG_DIR` 指定目录 |
+| Codex CLI 用户 Hook | `%USERPROFILE%\.codex\hooks.json`，可由 `CODEX_HOME` 指定目录 |
+| 巡巡的 Hook 接收程序 | `%LOCALAPPDATA%\XunXun\HookRelay\XunXun.exe` |
+| 巡巡的项目历史、收件箱、生活提醒和订阅 | `%LOCALAPPDATA%\XunXun` |
+| T3 Code 项目清单 | 与 `XunXun.exe` 同目录的 `t3-projects.json` |
+
+### 构建自测
+
+源码位于 [src/](src)，手动接入脚本位于 [adapters/](adapters)，动作和提醒预览位于 [preview/](preview)。
 
 ```powershell
 $testDir = Join-Path (Get-Location).Path 'src\obj\xunxun-self-test'
@@ -153,7 +139,7 @@ Get-Content -LiteralPath (Join-Path $testDir 'self-test.txt') -Encoding UTF8
 if ($result.ExitCode -ne 0) { throw '巡巡自测失败。' }
 ```
 
-自测覆盖 Hook 注册与迁移、事件转发、动作轮换、桌面图标避让和双屏路线。双屏窗口切换等依赖本机桌面环境的检查会在报告里单独说明。
+自测覆盖 Hook 注册和事件转发、T3 完成与链接、收件箱、生活提醒、简报解析和调度、桌面图标避让及跨屏路线。双屏和 Windows 前台切换的实机检查状态会写在报告里。
 
 ## 许可证
 
